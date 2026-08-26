@@ -32,6 +32,12 @@ server.listen(0, async () => {
   const host = '127.0.0.1';
 
   try {
+    // 0. Test GET / serves index.html
+    const resIndex = await makeRequest({ host, port, path: '/', method: 'GET' });
+    assert.strictEqual(resIndex.statusCode, 200, 'GET / should return 200');
+    assert(resIndex.body.includes('Nepal Flood & Highway Watch'), 'Root page should serve index.html');
+    console.log('✅ GET / serves index.html properly.');
+
     // 1. Test GET /api/highways
     const resHw = await makeRequest({ host, port, path: '/api/highways', method: 'GET' });
     assert.strictEqual(resHw.statusCode, 200, 'GET /api/highways should return 200');

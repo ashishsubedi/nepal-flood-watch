@@ -4,6 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;
 const DHM_URL = 'https://dhm.gov.np/hydrology/floodMonitoring';
 const BIPAD_URL = 'https://bipadportal.gov.np/api/v1/incident/?ordering=-incident_on&limit=50';
@@ -989,7 +990,8 @@ function getHighwayOverrides() {
   }
   if (Object.keys(overrides).length === 0 && fs.existsSync(HIGHWAY_OVERRIDES_FILE)) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(HIGHWAY_OVERRIDES_FILE, 'utf8'));
+      const raw = fs.readFileSync(HIGHWAY_OVERRIDES_FILE, 'utf8').trim();
+      const parsed = raw ? JSON.parse(raw) : {};
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         for (const [k, v] of Object.entries(parsed)) {
           if (VALID_HIGHWAY_IDS.has(k) && v && typeof v === 'object') {
@@ -1575,6 +1577,10 @@ app.get('/api/situation', async (req, res) => {
     }
   } catch (_) { /* fall through */ }
   res.json({ source: reports.length ? 'ReliefWeb' : 'fallback', reports, helplines: HELPLINES });
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 if (require.main === module) {
