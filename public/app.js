@@ -1,8 +1,8 @@
 const I18N = {
   en: {
     appTitle: 'Nepal Flood & Highway Watch',
-    tabHighways: 'Highways', tabRivers: 'Rivers', tabHelplines: 'Helplines',
-    radar: 'Radar', from: 'From', to: 'To', filterRivers: 'Filter by name / district…', incidents: 'Live Incidents',
+    tabHighways: 'Highways', tabRivers: 'Rivers', tabLiveIncidents: 'Live Incident', tabHelplines: 'Helplines',
+    radar: 'Radar', from: 'From', to: 'To', filterRivers: 'Filter by name / district…', filterIncidents: 'Filter incidents…', incidents: 'Live Incidents',
     riverStations: 'River Stations', filterAll: 'All', filterDanger: 'Danger Only',
     officialReport: 'Official Report', searchNews: 'Search News', sourceBipad: 'NDRRMA / BIPAD',
     newsBadge: '📰 Live Coverage', searchNewsPh: 'Search news articles…', searchBtn: 'Search',
@@ -40,8 +40,8 @@ const I18N = {
   },
   ne: {
     appTitle: 'नेपाल बाढी तथा सडक अवस्था',
-    tabHighways: 'सडक', tabRivers: 'नदी', tabHelplines: 'सम्पर्क',
-    radar: 'रडार', from: 'बाट', to: 'सम्म', filterRivers: 'नाम / जिल्लाले छान्नुहोस्…', incidents: 'प्रत्यक्ष घटनाहरू',
+    tabHighways: 'सडक', tabRivers: 'नदी', tabLiveIncidents: 'प्रत्यक्ष घटना', tabHelplines: 'सम्पर्क',
+    radar: 'रडार', from: 'बाट', to: 'सम्म', filterRivers: 'नाम / जिल्लाले छान्नुहोस्…', filterIncidents: 'घटना खोज्नुहोस्…', incidents: 'प्रत्यक्ष घटनाहरू',
     riverStations: 'नदी स्टेशनहरू', filterAll: 'सबै', filterDanger: 'खतरा मात्र',
     officialReport: 'सरकारी प्रतिवेदन', searchNews: 'समाचार खोज्नुहोस्', sourceBipad: 'विपद पोर्टल',
     newsBadge: '📰 प्रत्यक्ष समाचार', searchNewsPh: 'समाचार लेखहरू खोज्नुहोस्…', searchBtn: 'खोज्नुहोस्',
@@ -475,23 +475,10 @@ function popupHighwayNode(h) {
   d.appendChild(meta);
 
   // Validated URL actions
-  const safeDorUrl = sanitizeUrl(h.dorUrl);
   const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
   const safeNewsUrl = sanitizeUrl(h.newsUrl);
 
-  if (h.statusSource === 'dor' && safeDorUrl) {
-    const eta = h.dorNotice?.repairEta ? ` (${lang === 'ne' ? 'अनुमानित' : 'ETA'}: ${h.dorNotice.repairEta})` : '';
-    const linkDiv = document.createElement('div');
-    linkDiv.style.marginTop = '8px';
-    const a = document.createElement('a');
-    a.href = safeDorUrl;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.cssText = 'display:inline-block;padding:3px 8px;background:#064e3b;color:#34d399;border:1px solid rgba(52,211,153,0.35);border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;';
-    a.textContent = `🏛️ ${t('sourceTagDor')}${eta} ➔`;
-    linkDiv.appendChild(a);
-    d.appendChild(linkDiv);
-  } else if (h.statusSource === 'bipad' && safeBipadUrl) {
+  if (h.statusSource === 'bipad' && safeBipadUrl) {
     const linkDiv = document.createElement('div');
     linkDiv.style.marginTop = '8px';
     const a = document.createElement('a');
@@ -562,15 +549,11 @@ function renderMarkers() {
     const isDanger = s.severity === 'danger';
     const isWarning = s.severity === 'warning';
 
-    // In 'hazards' mode, hide normal safe stations when viewing Highways, Helplines, or Danger filter
+    // In 'hazards' mode, hide normal safe stations when viewing Highways, Helplines, Live Incidents, or Danger filter
     if (mapFilterMode === 'hazards' && !isDanger && !isWarning) {
-      if (currentTab === 'highways' || currentTab === 'helplines' || (currentTab === 'rivers' && listFilter === 'danger')) {
+      if (currentTab === 'highways' || currentTab === 'helplines' || currentTab === 'live-incidents' || (currentTab === 'rivers' && listFilter === 'danger')) {
         continue;
       }
-    }
-
-    if (currentTab === 'rivers' && listFilter === 'incidents') {
-      continue;
     }
 
     // Refined visual hierarchy: prominent danger/warning, subtle small safe dots
@@ -629,7 +612,7 @@ function renderMarkers() {
       iconAnchor: [8, 8]
     });
     const title = lang === 'ne' ? (inc.titleNe || inc.titleEn) : (inc.titleEn || inc.titleNe);
-    const dateStr = inc.occurredAt ? new Date(inc.occurredAt).toLocaleDateString() : '';
+    const dateStr = inc.occurredAt ? formatNewsDateTime(inc.occurredAt) : '';
     const reportUrl = inc.bipadUrl || `https://bipadportal.gov.np/incidents/${inc.id}`;
 
     const pd = document.createElement('div');
@@ -652,7 +635,7 @@ function renderMarkers() {
 
     const m = L.marker([inc.lat, inc.lon], { icon }).bindPopup(pd);
     m.on('click', () => {
-      selectItem('inc-' + inc.id, inc.lat, inc.lon, 12, m, 'rivers');
+      selectItem('inc-' + inc.id, inc.lat, inc.lon, 12, m, 'live-incidents');
     });
     m.addTo(hazardLayer);
     incidentMarkers.set(String(inc.id), m);
@@ -713,7 +696,7 @@ function createIncidentCard(x) {
   nameEl.textContent = title;
   const metaEl = document.createElement('div');
   metaEl.className = 'meta';
-  const dateStr = x.occurredAt ? new Date(x.occurredAt).toLocaleDateString() : '';
+  const dateStr = x.occurredAt ? formatNewsDateTime(x.occurredAt) : '';
   metaEl.textContent = `${dateStr} · ${t('sourceBipad')}`;
 
   const actionsEl = document.createElement('div');
@@ -778,12 +761,10 @@ function renderIncidents(filter = '') {
     .sort((a, b) => new Date(b.occurredAt || 0) - new Date(a.occurredAt || 0));
 
   if (!list.length) {
-    if (listFilter === 'incidents' || listFilter === 'danger') {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = t('noDangerIncidents');
-      el.appendChild(empty);
-    }
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = t('noDangerIncidents');
+    el.appendChild(empty);
     return;
   }
   const frag = document.createDocumentFragment();
@@ -1091,14 +1072,12 @@ function selectHighwaySegment(h) {
 
     let sourceBadge = '';
     let actionBtn = '';
-    const safeDorUrl = sanitizeUrl(h.dorUrl);
     const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
     const safeNewsUrl = sanitizeUrl(h.newsUrl);
 
     if (h.statusSource === 'dor') {
       const isRed = h.status === 'blocked';
       sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${isRed ? 'rgba(239,68,68,0.18)' : 'rgba(52,211,153,0.18)'};color:${isRed ? '#ef4444' : '#34d399'};border:1px solid ${isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)'};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${escapeHtml(lang === 'ne' ? 'सडक विभाग' : 'DoR')}</span>`;
-      if (safeDorUrl) actionBtn = `<a href="${safeDorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" style="margin-top:6px;">🏛️ ${escapeHtml(t('sourceTagDor'))} ➔</a>`;
     } else if (h.statusSource === 'bipad') {
       sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${escapeHtml(lang === 'ne' ? 'पहिरो' : 'Landslide')} (${escapeHtml(String(h.incidentDistKm || 0))} km)</span>`;
       if (safeBipadUrl) actionBtn = `<a href="${safeBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" style="margin-top:6px;">🏛️ ${escapeHtml(t('officialReport'))} ➔</a>`;
@@ -1132,7 +1111,6 @@ function createHighwayCard(h) {
 
   let dynamicBadge = '';
   let actionLink = '';
-  const safeDorUrl = sanitizeUrl(h.dorUrl);
   const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
   const safeNewsUrl = sanitizeUrl(h.newsUrl);
 
@@ -1143,9 +1121,6 @@ function createHighwayCard(h) {
     const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)';
     const tagText = isRed ? (lang === 'ne' ? 'सडक विभाग: बन्द' : 'DoR Closed') : (lang === 'ne' ? 'सडक विभाग: एकतर्फी' : 'DoR One-Way');
     dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${escapeHtml(tagText)}</span>`;
-    if (safeDorUrl) {
-      actionLink = `<a href="${safeDorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" onclick="event.stopPropagation()">🏛️ ${escapeHtml(t('sourceTagDor'))}</a>`;
-    }
   } else if (h.statusSource === 'bipad') {
     const isRed = h.status === 'blocked';
     const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.18)';
@@ -1306,29 +1281,16 @@ function renderHelplines() {
 }
 
 function applyListFilter() {
+  // Rivers filter: 'all' or 'danger' only — danger shows danger rivers only
   document.querySelectorAll('#panel-rivers .filters .chip').forEach((c) => c.classList.toggle('active', c.dataset.filter === listFilter));
   const search = document.getElementById('search');
-  const stations = document.getElementById('station-list');
-  const incHead = document.querySelector('#panel-rivers .subhead');
-  const stationsHead = document.getElementById('stations-head');
-  const incList = document.getElementById('incident-list');
+  if (search) renderStations(search.value);
+  renderMarkers();
+}
 
-  search.classList.remove('hidden'); stations.classList.remove('hidden');
-  stationsHead.classList.remove('hidden'); incHead.classList.remove('hidden'); incList.classList.remove('hidden');
-
-  if (listFilter === 'incidents') {
-    stations.classList.add('hidden'); stationsHead.classList.add('hidden');
-    incHead.textContent = t('incidents');
-    renderIncidents(search.value);
-  } else if (listFilter === 'danger') {
-    incHead.textContent = t('incidents');
-    renderStations(search.value);
-    renderIncidents(search.value);
-  } else {
-    incHead.textContent = t('incidents');
-    renderStations(search.value);
-    renderIncidents(search.value);
-  }
+function applyIncidentFilter() {
+  const search = document.getElementById('incident-search');
+  renderIncidents(search ? search.value : '');
 }
 
 function checkRoute() {
@@ -1433,7 +1395,9 @@ async function loadIncidents() {
   try {
     const j = await (await fetch('/api/incidents')).json();
     incidents = j.incidents || [];
-    renderMarkers(); renderIncidents(document.getElementById('search').value); applyListFilter();
+    renderMarkers();
+    const incidentInput = document.getElementById('incident-search');
+    renderIncidents(incidentInput ? incidentInput.value : '');
   } catch (_) {}
 }
 
@@ -1666,8 +1630,9 @@ function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
   document.getElementById('lang-switch').textContent = lang === 'en' ? 'नेपाली' : 'English';
-  renderStations(document.getElementById('search').value);
-  renderIncidents(document.getElementById('search').value);
+  renderStations(document.getElementById('search') ? document.getElementById('search').value : '');
+  const incidentInput = document.getElementById('incident-search');
+  renderIncidents(incidentInput ? incidentInput.value : '');
   renderHighways();
   renderHelplines();
   applyListFilter();
@@ -1838,7 +1803,10 @@ if (mapModeBtn) {
   });
 }
 
-document.getElementById('search').addEventListener('input', () => { applyListFilter(); });
+const riverSearchEl = document.getElementById('search');
+if (riverSearchEl) riverSearchEl.addEventListener('input', () => { applyListFilter(); });
+const incidentSearchEl = document.getElementById('incident-search');
+if (incidentSearchEl) incidentSearchEl.addEventListener('input', () => { applyIncidentFilter(); });
 
 ['change', 'input'].forEach((evt) => {
   document.getElementById('route-from').addEventListener(evt, () => {

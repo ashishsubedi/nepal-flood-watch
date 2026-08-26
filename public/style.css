@@ -527,7 +527,7 @@ body { background: var(--bg); color: var(--text); }
   line-height: 1.4;
 }
 
-#search {
+#search, #incident-search {
   width: 100%; padding: 9px; border-radius: 8px; border: 1px solid #0a0f15;
   background: var(--panel2); color: var(--text); font-size: 13px;
 }

@@ -66,6 +66,7 @@
     <nav id="tabs" class="tabs">
       <button class="tab active" data-tab="highways"><span>🛣️</span><span data-i18n="tabHighways">Highways</span></button>
       <button class="tab" data-tab="rivers"><span>🌊</span><span data-i18n="tabRivers">Rivers</span></button>
+      <button class="tab" data-tab="live-incidents"><span>🚨</span><span data-i18n="tabLiveIncidents">Live Incident</span></button>
       <button class="tab" data-tab="helplines"><span>🆘</span><span data-i18n="tabHelplines">Helplines</span></button>
     </nav>
 
@@ -95,13 +96,17 @@
       <div class="filters">
         <button class="chip active" data-filter="all" data-i18n="filterAll">All</button>
         <button class="chip" data-filter="danger" data-i18n="filterDanger">Danger Only</button>
-        <button class="chip" data-filter="incidents" data-i18n="incidents">Incidents</button>
       </div>
       <input id="search" type="search" placeholder="Filter by name / district…" data-i18n-ph="filterRivers" />
-      <h2 class="subhead" data-i18n="incidents">Live Incidents</h2>
-      <div id="incident-list" class="card-list"></div>
       <h2 class="subhead" id="stations-head" data-i18n="riverStations">River Stations</h2>
       <div id="station-list" class="card-list"></div>
+    </section>
+
+    <!-- LIVE INCIDENTS -->
+    <section class="tab-panel" id="panel-live-incidents">
+      <input id="incident-search" type="search" placeholder="Filter incidents…" data-i18n-ph="filterIncidents" />
+      <h2 class="subhead" data-i18n="incidents">Live Incidents</h2>
+      <div id="incident-list" class="card-list"></div>
     </section>
 
     <!-- HELPLINES -->
