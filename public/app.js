@@ -477,8 +477,20 @@ function popupHighwayNode(h) {
   // Validated URL actions
   const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
   const safeNewsUrl = sanitizeUrl(h.newsUrl);
+  const safeDorUrl = sanitizeUrl(h.dorUrl);
 
-  if (h.statusSource === 'bipad' && safeBipadUrl) {
+  if (h.statusSource === 'dor' && safeDorUrl) {
+    const linkDiv = document.createElement('div');
+    linkDiv.style.marginTop = '8px';
+    const a = document.createElement('a');
+    a.href = safeDorUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.cssText = 'display:inline-block;padding:3px 8px;background:#1b2a3a;color:#f97316;border:1px solid #c2410c;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;';
+    a.textContent = `🏛️ ${lang === 'ne' ? 'सडक विभाग सूचना' : 'DoR Live Notice'} ➔`;
+    linkDiv.appendChild(a);
+    d.appendChild(linkDiv);
+  } else if (h.statusSource === 'bipad' && safeBipadUrl) {
     const linkDiv = document.createElement('div');
     linkDiv.style.marginTop = '8px';
     const a = document.createElement('a');
@@ -1109,10 +1121,11 @@ function createHighwayCard(h) {
   const codeBadge = h.code ? `<span class="badge-code">${escapeHtml(h.code)}</span>` : '';
   const distBadge = h.distanceKm ? `<span class="badge-distance">${escapeHtml(fmtDist(h.distanceKm))}</span>` : '';
 
-  let dynamicBadge = '';
+    let dynamicBadge = '';
   let actionLink = '';
   const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
   const safeNewsUrl = sanitizeUrl(h.newsUrl);
+  const safeDorUrl = sanitizeUrl(h.dorUrl);
 
   if (h.statusSource === 'dor') {
     const isRed = h.status === 'blocked';
@@ -1121,6 +1134,9 @@ function createHighwayCard(h) {
     const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)';
     const tagText = isRed ? (lang === 'ne' ? 'सडक विभाग: बन्द' : 'DoR Closed') : (lang === 'ne' ? 'सडक विभाग: एकतर्फी' : 'DoR One-Way');
     dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${escapeHtml(tagText)}</span>`;
+    if (safeDorUrl) {
+      actionLink = `<a href="${safeDorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" onclick="event.stopPropagation()">🏛️ ${escapeHtml(lang === 'ne' ? 'सडक विभाग सूचना' : 'DoR Notice')}</a>`;
+    }
   } else if (h.statusSource === 'bipad') {
     const isRed = h.status === 'blocked';
     const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.18)';

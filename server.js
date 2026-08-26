@@ -767,7 +767,7 @@ const HIGHWAYS = [
     noteEn: 'Night travel restricted. Trishuli–Dhunche–Syabrubesi prone to rockfalls.',
     noteNe: 'रात्रिकालीन यात्रा प्रतिबन्धित। त्रिशुली–धुन्चे–स्याब्रुबेसी खण्डमा ढुङ्गा खस्ने जोखिम।',
     lat: 28.05, lon: 85.25,
-    coords: [[27.7172, 85.3240], [27.8100, 85.2000], [27.9150, 85.1500], [28.1100, 85.3000]]
+    coords: [[27.7172, 85.3240], [27.8100, 85.2000], [27.9150, 85.1500], [28.1100, 85.3000], [28.1650, 85.3384], [28.2700, 85.3800]]
   },
   {
     id: 'mid-hill-pkr-baglung',
@@ -1092,6 +1092,7 @@ async function fetchDepartmentOfRoads() {
     const valid = items.map((item) => ({
       id: String(item.id || ''),
       roadRefNo: String(item.road_refno || '').slice(0, 50),
+      linkCode: String(item.link_code || '').slice(0, 50),
       roadName: String(item.road_name || '').slice(0, 100),
       closureType: String(item.closure_type || 'CLOSED').toUpperCase(),
       closureReason: String(item.closure_reason || 'Disaster / Obstruction').slice(0, 150),
@@ -1104,7 +1105,7 @@ async function fetchDepartmentOfRoads() {
       efforts: String(item.efforts_being_made || '').slice(0, 300),
       reportedAt: item.date_created || item.date_roadblock_start || null,
       dorUrl: 'https://navigate.dor.gov.np/app/dashboard',
-    })).filter((x) => x.lat && x.lon);
+    })).filter((x) => (x.lat && x.lon) || x.roadRefNo || x.roadName);
 
     dorCache = { at: now, data: valid };
     return valid;
@@ -1112,6 +1113,108 @@ async function fetchDepartmentOfRoads() {
     console.error('DoR API notice:', err.message);
     return dorCache.data || [];
   }
+}
+
+// Deterministic Department of Roads (DoR) National Highway Code & Section Rules
+const DOR_HIGHWAY_RULES = {
+  'pasang-lhamu': {
+    codes: ['NH42', 'H21', 'NH09'],
+    terms: ['pasang lhamu', 'पासाङ', 'shyaphrubesi', 'syafrubesi', 'स्याफ्रुबेसी', 'rasuwagadhi', 'रसुवागढी', 'dhunche', 'धुन्चे', 'trishuli', 'त्रिशुली', 'timure', 'टिमुरे', 'khalte', 'betrawati', 'kakani', 'ramche'],
+    districts: ['rasuwa', 'nuwakot']
+  },
+  'prithvi-ktm-mugling': {
+    codes: ['NH17', 'H04', 'NH04'],
+    terms: ['prithvi', 'पृथ्वी', 'naubise', 'नौबिसे', 'galchhi', 'गल्छी', 'malekhu', 'मलेखु', 'mugling', 'मुग्लिन', 'kurintar', 'कुरिनटार', 'mowa khola', 'mawa khola', 'मवा खोला', 'jawang khola', 'जवाङ खोला', 'trisuli bridge', 'baireni', 'बैरेनी', 'chalise', 'चालीसे', 'ghatbesi', 'घाटबेँसी'],
+    districts: ['dhading', 'chitwan', 'chitawan', 'kathmandu']
+  },
+  'prithvi-mugling-pkr': {
+    codes: ['NH17', 'H04', 'NH04'],
+    terms: ['mugling-pokhara', 'मुग्लिन पोखरा', 'aanbu khaireni', 'आँबुखैरेनी', 'dumre', 'डुम्रे', 'damauli', 'दमौली', 'kotre', 'कोत्रे', 'pokhara', 'पोखरा', 'tanahun', 'तनहुँ'],
+    districts: ['tanahun', 'kaski', 'gorkha']
+  },
+  'narayanghat-mugling': {
+    codes: ['NH17', 'H04-LINK', 'NH44'],
+    terms: ['narayanghat', 'narayangadh', 'नारायणगढ', 'नारायणघाट', 'tuin khola', 'तुइन खोला', 'seti dobhan', 'सेती दोभान', 'jalbire', 'जलविरे', 'dasdhunga', 'दासढुङ्गा', 'jugedi'],
+    districts: ['chitwan', 'chitawan']
+  },
+  'araniko-highway': {
+    codes: ['NH34', 'H03', 'NH03'],
+    terms: ['araniko', 'अरनिको', 'dhulikhel', 'धुलिखेल', 'panchkhal', 'पाँचखाल', 'dolalghat', 'दोलालघाट', 'balephi', 'बलेफी', 'barabise', 'barhabise', 'बाह्रबिसे', 'kodari', 'कोदारी', 'tatopani', 'तातोपानी', 'daklang', 'डाक्लाङ', 'liping', 'लिपिङ', 'sindhupalchok', 'सिन्धुपाल्चोक'],
+    districts: ['sindhupalchok', 'kavrepalanchok', 'kavre']
+  },
+  'bp-highway': {
+    codes: ['NH08', 'H06'],
+    terms: ['bp highway', 'बीपी', 'बिपी', 'roshi', 'रोशी', 'nepalthok', 'नेपालथोक', 'khurkot', 'खुर्कोट', 'sindhuli', 'सिन्धुली', 'bardibas', 'बर्दिबास', 'bhakundebesi', 'भकुन्डेबेसी'],
+    districts: ['kavrepalanchok', 'sindhuli', 'mahottari']
+  },
+  'mechi-kakarbhitta-ilam': {
+    codes: ['NH02', 'H07'],
+    terms: ['mechi', 'मेची', 'charali', 'चारआली', 'kanyam', 'कन्याम', 'fikkal', 'फिक्कल', 'ilam', 'इलाम', 'mai khola', 'माई खोला', 'biblynate', 'विब्ल्याँटे', 'rajduwali', 'राजदुवाली'],
+    districts: ['jhapa', 'ilam']
+  },
+  'mid-hill-pkr-baglung': {
+    codes: ['NH03', 'H16'],
+    terms: ['pushpalal', 'पुष्पलाल', 'mid-hill', 'madhyapahadi', 'मध्यपहाडी', 'kushma', 'कुश्मा', 'baglung', 'बागलुङ', 'lukumgaon', 'लुकुमगाउँ', 'rukumkot', 'रुकुमकोट', 'patihalna', 'पातीहाल्ना', 'nayapul', 'नयाँपुल', 'dimuwa', 'डिमुवा'],
+    districts: ['kaski', 'parbat', 'baglung', 'rukum east', 'rukum']
+  },
+  'kaligandaki-baglung-jomsom': {
+    codes: ['NH17', 'NH76'],
+    terms: ['kaligandaki', 'कालीगण्डकी', 'beni', 'बेनी', 'tatopani', 'तातोपानी', 'rupse', 'रुप्से', 'ghasa', 'घाँसा', 'marpha', 'मार्फा', 'jomsom', 'जोमसोम', 'korala', 'कोरोला'],
+    districts: ['myagdi', 'mustang', 'baglung']
+  },
+  'karnali-surkhet-jumla': {
+    codes: ['NH49', 'H13', 'NH13'],
+    terms: ['karnali', 'कर्णाली', 'kalikot', 'कालिकोट', 'jumla', 'जुम्ला', 'manma', 'मान्म', 'khulalu', 'खुलालु', 'nagma', 'नाग्मा', 'dailekh', 'दैलेख'],
+    districts: ['surkhet', 'dailekh', 'kalikot', 'jumla']
+  },
+  'siddhartha-pkr-butwal': {
+    codes: ['NH47', 'H10', 'NH10'],
+    terms: ['siddhartha', 'सिद्धार्थ', 'siddhababa', 'सिद्धबाबा', 'palpa', 'पाल्पा', 'bartung', 'बर्तुङ', 'ramdi', 'राम्दी', 'waling', 'वालिङ', 'syangja', 'स्याङ्जा', 'khaste'],
+    districts: ['palpa', 'syangja', 'rupandehi', 'kaski']
+  },
+  'kanti-lokpath': {
+    codes: ['NH18', 'NH25'],
+    terms: ['kanti lokpath', 'कान्ति लोकपथ', 'tikabhairab', 'टीकाभैरव', 'bhattedanda', 'भट्टेडाँडा', 'kalche', 'कालचे', 'bhimfedi', 'भीमफेदी', 'hetauda', 'हेटौंडा'],
+    districts: ['lalitpur', 'makwanpur']
+  },
+  'tribhuvan-highway': {
+    codes: ['NH07', 'H02', 'NH02'],
+    terms: ['tribhuvan', 'त्रिभुवन', 'pathlaiya', 'पथलैया', 'simara', 'सिमरा', 'birgunj', 'वीरगञ्ज', 'parwanipur', 'परवानीपुर'],
+    districts: ['makwanpur', 'bara', 'parsa']
+  },
+  'east-west-chitwan-butwal': {
+    codes: ['NH01', 'H01', 'H01-C2'],
+    terms: ['daunne', 'दाउन्ने', 'kawasoti', 'कावासोती', 'bardaghat', 'बर्दघाट', 'dumkibas', 'दुम्किबास', 'narayanghat butwal', 'नारायणगढ बुटवल'],
+    districts: ['nawalpur', 'nawalparasi', 'rupandehi', 'chitwan']
+  },
+  'east-west-kohalpur-dhangadhi': {
+    codes: ['NH01', 'H01', 'H01-W2'],
+    terms: ['chisapani', 'चिसापानी', 'karnali bridge', 'कर्णाली पुल', 'attariya', 'अत्तरिया', 'kohalpur dhangadhi'],
+    districts: ['bardiya', 'kailali', 'banke']
+  }
+};
+
+function matchDorToHighway(dor, highway) {
+  const rule = DOR_HIGHWAY_RULES[highway.id];
+  if (!rule) return false;
+
+  const ref = String(dor.roadRefNo || dor.road_refno || '').toUpperCase().trim();
+  const link = String(dor.linkCode || dor.link_code || '').toUpperCase().trim();
+  const name = String(dor.roadName || dor.road_name || '').toLowerCase();
+  const loc = String(dor.location || '').toLowerCase();
+  const dist = String(dor.district || '').toLowerCase();
+  const roadText = name + ' ' + loc;
+
+  const codeMatch = rule.codes.some((c) => ref === c || link.startsWith(c));
+  const textMatch = rule.terms.some((t) => roadText.includes(t.toLowerCase()));
+  const districtMatch = rule.districts.some((d) => dist.includes(d.toLowerCase()));
+
+  // 1. Definite match: specific road section / location matches corridor keyword
+  if (textMatch && (codeMatch || districtMatch)) return true;
+  if (textMatch && !ref) return true;
+  // 2. Code + District match: e.g. NH42 in Rasuwa
+  if (codeMatch && districtMatch) return true;
+  return false;
 }
 
 // Background poller for DoR every 2 hours
@@ -1290,21 +1393,29 @@ async function getDynamicHighways() {
       let candidateSource = 'baseline';
       const activeHazards = [];
 
-      // 1. Evaluate All Department of Roads (DoR) Official Road Closure Notices
+      // 1. Evaluate All Department of Roads (DoR) Official Road Closure Notices (Deterministic Code/Section Match + Spatial Proximity)
       const matchingDorList = [];
       for (const dor of dorClosures) {
-        const dist = distToPolylineKm(dor.lat, dor.lon, highway.coords || [[highway.lat, highway.lon]]);
-        if (dist <= DOR_MATCH_THRESHOLD_KM) {
-          matchingDorList.push({ dor, dist: Number(dist.toFixed(1)) });
+        const isRuleMatch = matchDorToHighway(dor, highway);
+        let dist = Infinity;
+        if (dor.lat && dor.lon) {
+          dist = distToPolylineKm(dor.lat, dor.lon, highway.coords || [[highway.lat, highway.lon]]);
+        }
+        if (isRuleMatch || dist <= DOR_MATCH_THRESHOLD_KM) {
+          matchingDorList.push({
+            dor,
+            dist: Number.isFinite(dist) ? Number(dist.toFixed(1)) : 0,
+            isRuleMatch: !!isRuleMatch,
+          });
         }
       }
 
       if (matchingDorList.length > 0) {
-        // Sort closest first
-        matchingDorList.sort((a, b) => a.dist - b.dist);
+        // Prioritize deterministic rule matches, then nearest distance
+        matchingDorList.sort((a, b) => (b.isRuleMatch ? 1 : 0) - (a.isRuleMatch ? 1 : 0) || a.dist - b.dist);
         const closestDor = matchingDorList[0].dor;
         const minDorDist = matchingDorList[0].dist;
-        const isClosed = matchingDorList.some(m => m.dor.closureType === 'CLOSED');
+        const isClosed = matchingDorList.some((m) => m.dor.closureType === 'CLOSED');
         const dorStatus = isClosed ? 'blocked' : 'caution';
 
         if (STATUS_SEVERITY[dorStatus] > (STATUS_SEVERITY[candidateStatus] || 0)) {
