@@ -36,6 +36,7 @@ const I18N = {
     sourceTagBipad: 'BIPAD Hazard',
     sourceTagNews: 'News Alert',
     sourceTagOverride: 'Verified Update',
+    detourBadge: 'Alternate Detour',
   },
   ne: {
     appTitle: 'नेपाल बाढी तथा सडक अवस्था',
@@ -74,6 +75,7 @@ const I18N = {
     sourceTagBipad: 'विपद् घटना',
     sourceTagNews: 'समाचार अपडेट',
     sourceTagOverride: 'प्रमाणित अवस्था',
+    detourBadge: 'वैकल्पिक मार्ग (डिटुर)',
   },
 };
 
@@ -418,10 +420,7 @@ function popupHighwayNode(h) {
   const statusColor = SEV_COLOR[h.status] || '#10b981';
 
   let sourceHtml = '';
-  if (h.statusSource === 'dor' && h.dorUrl) {
-    const eta = h.dorNotice?.repairEta ? ` (${lang === 'ne' ? 'अनुमानित' : 'ETA'}: ${h.dorNotice.repairEta})` : '';
-    sourceHtml = `<div style="margin-top:8px;"><a href="${h.dorUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#064e3b;color:#34d399;border:1px solid rgba(52,211,153,0.35);border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">🏛️ ${t('sourceTagDor')}${eta} ➔</a></div>`;
-  } else if (h.statusSource === 'bipad' && h.incidentBipadUrl) {
+  if (h.statusSource === 'bipad' && h.incidentBipadUrl) {
     sourceHtml = `<div style="margin-top:8px;"><a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#1b2a3a;color:#2f9bff;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">🏛️ ${t('officialReport')} (${h.incidentDistKm} km)</a></div>`;
   } else if (h.statusSource === 'news' && h.newsUrl) {
     sourceHtml = `<div style="margin-top:8px;"><a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#1b2a3a;color:#38bdf8;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">📰 ${h.newsSource || t('readNews')} ➔</a></div>`;
@@ -530,13 +529,7 @@ function renderMarkers() {
     const m = L.marker([h.lat, h.lon], { icon })
       .bindPopup(popupHighwayNode(h));
     m.on('click', () => {
-      selectItem('hw-' + h.id, h.lat, h.lon, 11, m, 'highways');
-      const selF = document.getElementById('route-from'), selT = document.getElementById('route-to');
-      if (selF && selT) {
-        selF.value = h.from;
-        selT.value = h.to;
-        checkRoute();
-      }
+      selectHighwaySegment(h);
     });
     m.addTo(hazardLayer);
     highwayMarkers.set(String(h.id), m);
@@ -851,12 +844,19 @@ function findRoute(origin, destination) {
   }
 
   // 3. Dynamic Calculation: Status-Weighted Dijkstra
+  const directHw = highways.find((hw) =>
+    (hw.from.toLowerCase() === o.toLowerCase() && hw.to.toLowerCase() === d.toLowerCase()) ||
+    (hw.from.toLowerCase() === d.toLowerCase() && hw.to.toLowerCase() === o.toLowerCase())
+  );
+
   const pathEdges = calculateDijkstra(o, d);
   if (!pathEdges || !pathEdges.length) return null;
 
   const segs = pathEdges.map((e) => e.segment);
   const worst = segs.reduce((w, s) => (HW_RANK[s.status] > HW_RANK[w] ? s.status : w), 'open');
   const totalDist = segs.reduce((sum, s) => sum + (s.distanceKm || 0), 0);
+
+  const isBypassDetour = directHw && directHw.status === 'blocked' && (segs.length > 1 || segs[0].id !== directHw.id);
 
   let allCoords = [];
   for (const edge of pathEdges) {
@@ -873,19 +873,29 @@ function findRoute(origin, destination) {
   }
 
   // Dynamic note synthesis
-  const notesEnList = segs.map((s) => s.noteEn).filter(Boolean);
-  const notesNeList = segs.map((s) => s.noteNe).filter(Boolean);
-  const noteEn = notesEnList.length ? notesEnList.join(' · ') : `Route via ${segs.map(s => s.nameEn).join(', ')}.`;
-  const noteNe = notesNeList.length ? notesNeList.join(' · ') : `${segs.map(s => s.nameNe || s.nameEn).join(', ')} हुँदै यात्रा।`;
+  let noteEn, noteNe;
+  if (isBypassDetour) {
+    const directName = directHw.nameEn;
+    const directNote = directHw.noteEn || 'Direct road is blocked.';
+    noteEn = `⛔ Direct route (${directName}) is BLOCKED. Detour via ${segs.map(s => s.nameEn).join(' ➔ ')} (${totalDist} km). [${directNote}]`;
+    noteNe = `⛔ प्रत्यक्ष सडक (${directHw.nameNe || directName}) अवरुद्ध छ। वैकल्पिक डिटुर: ${segs.map(s => s.nameNe || s.nameEn).join(' ➔ ')} (${toNepaliDigits(totalDist)} किमी)।`;
+  } else {
+    const notesEnList = segs.map((s) => s.noteEn).filter(Boolean);
+    const notesNeList = segs.map((s) => s.noteNe).filter(Boolean);
+    noteEn = notesEnList.length ? notesEnList.join(' · ') : `Route via ${segs.map(s => s.nameEn).join(', ')}.`;
+    noteNe = notesNeList.length ? notesNeList.join(' · ') : `${segs.map(s => s.nameNe || s.nameEn).join(', ')} हुँदै यात्रा।`;
+  }
 
   const routeObj = {
     from: o,
     to: d,
-    status: worst,
+    status: isBypassDetour ? 'caution' : worst,
     distanceKm: totalDist,
     segments: segs,
     coords: allCoords,
     isPrecomputed: false,
+    isDetour: isBypassDetour,
+    directSegment: isBypassDetour ? directHw : null,
     noteEn,
     noteNe
   };
@@ -960,6 +970,70 @@ function highlightRouteOnMap(route) {
   }
 }
 
+function selectHighwaySegment(h) {
+  if (!h) return;
+
+  const selF = document.getElementById('route-from'), selT = document.getElementById('route-to');
+  if (selF && selT) {
+    selF.value = h.from;
+    selT.value = h.to;
+  }
+
+  // Highlight corresponding marker & select item in tab
+  selectItem('hw-' + h.id, h.lat, h.lon, 11, highwayMarkers.get(String(h.id)), 'highways');
+
+  // Highlight the EXACT highway segment on map with its true status color
+  const segRoute = {
+    from: h.from,
+    to: h.to,
+    status: h.status,
+    distanceKm: h.distanceKm,
+    coords: h.coords || [[h.lat, h.lon]],
+    segments: [h],
+    isPrecomputed: false,
+    noteEn: h.noteEn,
+    noteNe: h.noteNe,
+  };
+  highlightRouteOnMap(segRoute);
+
+  // Render verdict box directly reflecting this specific highway segment
+  const box = document.getElementById('route-verdict');
+  if (box) {
+    const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
+    const fromDisp = toPlaceName(h.from);
+    const toDisp = toPlaceName(h.to);
+    const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
+    const note = lang === 'ne' ? (h.noteNe || h.noteEn || '') : (h.noteEn || h.noteNe || '');
+    const distInfo = h.distanceKm ? ` · ${fmtDist(h.distanceKm)}` : '';
+    const codeBadge = h.code ? `<span class="badge-code">${h.code}</span>` : '';
+
+    let sourceBadge = '';
+    let actionBtn = '';
+    if (h.statusSource === 'dor') {
+      const isRed = h.status === 'blocked';
+      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${isRed ? 'rgba(239,68,68,0.18)' : 'rgba(52,211,153,0.18)'};color:${isRed ? '#ef4444' : '#34d399'};border:1px solid ${isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)'};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${lang === 'ne' ? 'सडक विभाग' : 'DoR'}</span>`;
+    } else if (h.statusSource === 'bipad') {
+      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${lang === 'ne' ? 'पहिरो' : 'Landslide'} (${h.incidentDistKm} km)</span>`;
+      if (h.incidentBipadUrl) actionBtn = `<a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" style="margin-top:6px;">🏛️ ${t('officialReport')} ➔</a>`;
+    } else if (h.statusSource === 'news') {
+      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">📰 ${h.newsSource || 'News'}</span>`;
+      if (h.newsUrl) actionBtn = `<a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn news" style="margin-top:6px;">📰 ${t('readNews')} ➔</a>`;
+    }
+
+    box.className = 'verdict ' + h.status;
+    box.innerHTML = `
+      <div class="verdict-header">
+        <span>📍 ${fromDisp} ➔ ${toDisp}${distInfo}</span>
+        <span class="verdict-status">${label[h.status] || h.status}</span>
+      </div>
+      <div style="margin-top:4px;">${codeBadge} <span style="font-weight:600;font-size:12px;">${name}</span>${sourceBadge}</div>
+      <div class="sub" style="margin-top:6px;">${note}</div>
+      ${actionBtn ? `<div style="margin-top:6px;">${actionBtn}</div>` : ''}
+    `;
+    box.classList.remove('hidden');
+  }
+}
+
 function createHighwayCard(h) {
   const div = document.createElement('div');
   div.className = 'card ' + h.status;
@@ -979,9 +1053,6 @@ function createHighwayCard(h) {
     const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)';
     const tagText = isRed ? (lang === 'ne' ? 'सडक विभाग: बन्द' : 'DoR Closed') : (lang === 'ne' ? 'सडक विभाग: एकतर्फी' : 'DoR One-Way');
     dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${tagText}</span>`;
-    if (h.dorUrl) {
-      actionLink = `<a href="${h.dorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" onclick="event.stopPropagation()">🏛️ ${t('sourceTagDor')}</a>`;
-    }
   } else if (h.statusSource === 'bipad') {
     const isRed = h.status === 'blocked';
     const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.18)';
@@ -1014,12 +1085,7 @@ function createHighwayCard(h) {
     ${actionLink ? `<div class="hw-card-actions">${actionLink}</div>` : ''}`;
 
   div.onclick = () => {
-    const selF = document.getElementById('route-from'), selT = document.getElementById('route-to');
-    if (selF && selT) {
-      selF.value = h.from;
-      selT.value = h.to;
-      checkRoute();
-    }
+    selectHighwaySegment(h);
   };
   return div;
 }
@@ -1200,9 +1266,12 @@ function checkRoute() {
     }).join(' <span class="seg-arrow">➔</span> ');
 
     const distInfo = route.distanceKm ? ` · ${fmtDist(route.distanceKm)}` : '';
+    const detourBadgeHtml = route.isDetour
+      ? `<span class="badge-auto-blocked" style="background:rgba(249,115,22,0.18);color:#f97316;border:1px solid rgba(249,115,22,0.4);font-weight:700;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">🔄 ${t('detourBadge')}</span>`
+      : '';
     const badgeType = route.isPrecomputed
       ? `<span class="badge-fastpath">${t('topRouteBadge')}</span>`
-      : `<span class="badge-code">${t('calculatedBadge')} (${fmtLegs(route.segments.length)})</span>`;
+      : `<span class="badge-code">${t('calculatedBadge')} (${fmtLegs(route.segments.length)})</span>${detourBadgeHtml}`;
 
     box.className = 'verdict ' + route.status;
     box.innerHTML = `
