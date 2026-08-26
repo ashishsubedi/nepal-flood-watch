@@ -11,6 +11,12 @@
 <body>
   <div id="map"></div>
 
+  <div id="map-controls" class="map-controls">
+    <button id="map-mode-toggle" class="map-floating-chip active" title="Toggle map hazard / all gauges view">
+      <span id="map-mode-icon">⚠️</span> <span id="map-mode-label" data-i18n="mapHazardsOnly">Hazards Only</span>
+    </button>
+  </div>
+
   <header id="topbar">
     <div class="brand">
       <span class="logo">🌊</span>
@@ -20,6 +26,9 @@
       </div>
     </div>
     <div class="top-actions">
+      <a href="https://asubedi.com.np" target="_blank" rel="noopener noreferrer" class="chip website-chip" title="Ashish Subedi (asubedi.com.np)">
+        <span class="web-icon">🌐</span> <span class="web-label">asubedi.com.np</span>
+      </a>
       <button id="radar-toggle" class="chip" data-i18n="radar">Radar</button>
       <button id="lang-switch" class="chip">नेपाली</button>
     </div>
@@ -72,6 +81,10 @@
     <section class="tab-panel" id="panel-helplines">
       <div id="helpline-list" class="card-list"></div>
     </section>
+
+    <footer class="app-footer">
+      <span>Open Data Initiative · By <a href="https://asubedi.com.np" target="_blank" rel="noopener noreferrer">Ashish Subedi (asubedi.com.np)</a></span>
+    </footer>
 
     <button id="scroll-top-btn" class="scroll-top-btn" aria-label="Scroll to top">
       <span>↑</span> <span data-i18n="scrollTop">Top</span>

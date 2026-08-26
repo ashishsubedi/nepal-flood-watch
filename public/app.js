@@ -20,6 +20,8 @@ const I18N = {
     legendAbove: 'Above danger', legendWarn: 'Above warning', legendBelow: 'Below warning', legendNone: 'No data',
     noDangerStations: '🟢 All river stations are currently below warning level',
     noDangerIncidents: '🟢 No active critical flood or landslide incidents reported',
+    mapHazardsOnly: 'Hazards Only',
+    mapAllGauges: 'All Gauges',
   },
   ne: {
     appTitle: 'नेपाल बाढी तथा सडक अवस्था',
@@ -42,6 +44,8 @@ const I18N = {
     legendAbove: 'खतरा माथि', legendWarn: 'चेतावनी माथि', legendBelow: 'चेतावनी मुनि', legendNone: 'डाटा छैन',
     noDangerStations: '🟢 सबै नदी स्टेशनहरू हाल चेतावनी तह भन्दा मुनि छन्',
     noDangerIncidents: '🟢 हाल कुनै गम्भीर बाढी वा पहिरोका घटना रिपोर्ट गरिएको छैन',
+    mapHazardsOnly: 'खतरा मात्र',
+    mapAllGauges: 'सबै गेज',
   },
 };
 
@@ -130,6 +134,8 @@ const routeHighlightLayer = L.layerGroup().addTo(map);
 const stationMarkers = new Map();
 const incidentMarkers = new Map();
 const highwayMarkers = new Map();
+let currentTab = 'highways';
+let mapFilterMode = 'hazards';
 let currentNewsQuery = '';
 let currentNewsQueryEn = '';
 let currentNewsQueryNe = '';
@@ -330,6 +336,25 @@ function getIncidentNewsUrl(x) {
   return `https://news.google.com/search?q=${encodeURIComponent(query)}`;
 }
 
+function updateMapFilterButton(hazardCount = 0) {
+  const btn = document.getElementById('map-mode-toggle');
+  if (!btn) return;
+  const isHazards = mapFilterMode === 'hazards';
+  btn.classList.toggle('active', isHazards);
+  const iconEl = document.getElementById('map-mode-icon');
+  const labelEl = document.getElementById('map-mode-label');
+  if (iconEl) iconEl.textContent = isHazards ? '⚠️' : '🌐';
+  if (labelEl) {
+    if (isHazards) {
+      const countVal = lang === 'ne' ? toNepaliDigits(hazardCount) : hazardCount;
+      labelEl.innerHTML = `${t('mapHazardsOnly')}${hazardCount > 0 ? ` <span class="chip-count">${countVal}</span>` : ''}`;
+    } else {
+      const totalVal = lang === 'ne' ? toNepaliDigits(allStations.length) : allStations.length;
+      labelEl.innerHTML = `${t('mapAllGauges')} <span class="chip-count" style="background:#2563eb;color:#fff;">${totalVal}</span>`;
+    }
+  }
+}
+
 function renderMarkers() {
   stationLayer.clearLayers();
   hazardLayer.clearLayers();
@@ -338,28 +363,58 @@ function renderMarkers() {
   highwayMarkers.clear();
 
   const bounds = [];
+  const dangerGauges = allStations.filter(s => s.severity === 'danger' || s.severity === 'warning');
+  const blockedHighways = highways.filter(h => h.status === 'blocked' || h.status === 'night-banned');
+  const totalHazards = dangerGauges.length + blockedHighways.length + incidents.length;
+
+  updateMapFilterButton(totalHazards);
+
   for (const s of allStations) {
     if (s.lat == null || s.lon == null) continue;
-    const danger = s.severity === 'danger';
+    const isDanger = s.severity === 'danger';
+    const isWarning = s.severity === 'warning';
+
+    // In 'hazards' mode, hide normal safe stations when viewing Highways, Helplines, or Danger filter
+    if (mapFilterMode === 'hazards' && !isDanger && !isWarning) {
+      if (currentTab === 'highways' || currentTab === 'helplines' || (currentTab === 'rivers' && listFilter === 'danger')) {
+        continue;
+      }
+    }
+
+    if (currentTab === 'rivers' && listFilter === 'incidents') {
+      continue;
+    }
+
+    // Refined visual hierarchy: prominent danger/warning, subtle small safe dots
+    const radius = isDanger ? 9 : isWarning ? 7 : (mapFilterMode === 'hazards' ? 4 : 3.5);
+    const opacity = isDanger ? 1.0 : isWarning ? 0.95 : 0.45;
+    const weight = isDanger ? 2 : isWarning ? 1.5 : 0.8;
+    const color = isDanger ? '#ffffff' : isWarning ? '#ffffff' : 'rgba(255,255,255,0.45)';
+
     const m = L.circleMarker([s.lat, s.lon], {
-      radius: danger ? 8 : 6, color: '#fff', weight: 1,
-      fillColor: SEV_COLOR[s.severity], fillOpacity: 0.9,
+      radius,
+      color,
+      weight,
+      fillColor: SEV_COLOR[s.severity],
+      fillOpacity: opacity,
     }).bindPopup(popupNode(s));
     m.on('click', () => {
       selectItem(s.id, s.lat, s.lon, 12, m, 'rivers');
     });
     m.addTo(stationLayer);
     stationMarkers.set(String(s.id), m);
-    bounds.push([s.lat, s.lon]);
+    if (isDanger || isWarning) bounds.push([s.lat, s.lon]);
   }
 
   for (const h of highways) {
     if (h.lat == null || h.lon == null) continue;
-    const color = h.status === 'blocked' ? '#ef4444' : h.status === 'night-banned' ? '#f59e0b' : '#10b981';
+    const isBlocked = h.status === 'blocked';
+    const isNightBanned = h.status === 'night-banned';
+    const color = isBlocked ? '#ef4444' : isNightBanned ? '#f59e0b' : '#10b981';
     const icon = L.divIcon({
       className: 'highway-badge-icon',
-      html: `<div style="background:${color};width:12px;height:12px;border-radius:3px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5);"></div>`,
-      iconSize: [12, 12]
+      html: `<div style="background:${color};width:${isBlocked ? 14 : 11}px;height:${isBlocked ? 14 : 11}px;border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>`,
+      iconSize: [14, 14]
     });
     const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
     const fromDisp = toPlaceName(h.from);
@@ -1001,17 +1056,31 @@ function checkRoute() {
   box.classList.remove('hidden');
 }
 
+let lastStationsData = null;
+
+function updateStatusBadge(updatedAt, stationCount, isBaseline) {
+  const statusEl = document.getElementById('status');
+  if (!statusEl) return;
+  const d = new Date(updatedAt);
+  const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const gaugeWord = t('stations');
+  const countStr = lang === 'ne' ? toNepaliDigits(stationCount) : stationCount;
+  statusEl.innerHTML = `<span class="status-dot"></span><span>${countStr} ${gaugeWord} · ${timeStr}${isBaseline ? ' (offline)' : ''}</span>`;
+}
+
 async function loadStations() {
   const status = document.getElementById('status');
   try {
     const j = await (await fetch('/api/stations')).json();
     if (!j.stations) throw new Error(j.error || 'no data');
     allStations = j.stations;
-    renderMarkers(); renderStations(document.getElementById('search').value); applyListFilter();
-    const when = new Date(j.updated).toLocaleTimeString();
-    status.textContent = `${t('updated')} ${when}${j.cached ? ' (cached)' : ''} · ${j.stations.length} ${t('stations')}${j.baseline ? ' · baseline' : ''}`;
+    lastStationsData = j;
+    renderMarkers();
+    renderStations(document.getElementById('search').value);
+    applyListFilter();
+    updateStatusBadge(j.updated, j.stations.length, j.baseline);
   } catch (e) {
-    status.textContent = 'Gauges failed: ' + e.message;
+    if (status) status.textContent = 'Gauges: ' + e.message;
   }
 }
 
@@ -1077,9 +1146,11 @@ function showRadar(on) {
 }
 
 function switchTab(tabName) {
+  currentTab = tabName;
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabName));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + tabName));
   updateScrollTopButton();
+  renderMarkers();
 }
 
 // ---- i18n apply ----
@@ -1093,6 +1164,10 @@ function applyLang() {
   renderHighways();
   renderHelplines();
   applyListFilter();
+  if (lastStationsData) {
+    updateStatusBadge(lastStationsData.updated, lastStationsData.stations.length, lastStationsData.baseline);
+  }
+  renderMarkers();
   const box = document.getElementById('route-verdict');
   if (!box.classList.contains('hidden')) checkRoute();
 }
@@ -1191,6 +1266,15 @@ document.getElementById('lang-switch').addEventListener('click', () => {
 });
 
 document.getElementById('radar-toggle').addEventListener('click', () => showRadar(!document.getElementById('radar-toggle').classList.contains('on')));
+
+const mapModeBtn = document.getElementById('map-mode-toggle');
+if (mapModeBtn) {
+  mapModeBtn.addEventListener('click', () => {
+    mapFilterMode = mapFilterMode === 'hazards' ? 'all' : 'hazards';
+    renderMarkers();
+  });
+}
+
 document.getElementById('search').addEventListener('input', () => { applyListFilter(); });
 
 ['change', 'input'].forEach((evt) => {

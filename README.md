@@ -9,6 +9,7 @@
 * **🌊 Live DHM River Telemetry:** Direct scraper & parser for the Department of Hydrology & Meteorology (`dhm.gov.np`) monitoring over 300+ river stations nationwide with 5-minute caching and graceful offline baselines.
 * **🛣️ National Highway Route Checker:** Interactive corridor verdict system for Nepal's critical highways (Prithvi Highway, BP Highway, Narayanghat-Mugling, Karnali Highway, Pasang Lhamu, etc.) with multi-leg composite trip analysis.
 * **🚨 BIPAD Disaster Incidents:** Real-time integration with the Government of Nepal's BIPAD disaster portal (`bipadportal.gov.np`) tracking floods, landslides, and debris flows.
+* **📰 Incident News & Live Media Coverage:** Contextual news aggregator tracking ongoing floods, landslides, and road blockages across major national news sources (OnlineKhabar, Setopati, Ekantipur, Ratopati, The Kathmandu Post, etc.) with intelligent location token matching and 48-hour recency filtering.
 * **🌧️ Live Precipitation Radar:** Animated real-time weather radar tiles (via RainViewer) showing active storm cloud movement across the Himalayas.
 * **🆘 One-Tap Emergency Helplines:** Instant one-tap dialing for Nepal Police (100), Traffic Police (103), APF Disaster Rescue (1114), DHM Flood Alert (1155), Ambulance (102), and Red Cross.
 * **🇳🇵 100% Bilingual:** Instant one-tap toggle between Nepali (नेपाली Devanagari) and English across all tabs, warnings, and route notices.
@@ -52,6 +53,7 @@ npm run dev
 | `GET /api/stations` | Live DHM river gauges with warning/danger thresholds and 5-min caching |
 | `GET /api/highways` | Curated status & notices for Nepal's major highway corridors and composite routes |
 | `GET /api/incidents` | Live verified flood and landslide disaster incidents from BIPAD Portal |
+| `GET /api/incident-news` | Real-time incident news aggregator with geographic token matching & major Nepali media filters |
 | `GET /api/helplines` | Verified emergency contact numbers with categories |
 | `GET /api/situation` | ReliefWeb disaster summary reports and emergency registry |
 
