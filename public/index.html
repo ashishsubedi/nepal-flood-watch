@@ -17,6 +17,33 @@
     </button>
   </div>
 
+  <div id="radar-player" class="radar-player hidden">
+    <div class="radar-player-header">
+      <div class="radar-title-group">
+        <span class="radar-live-dot"></span>
+        <span class="radar-title-text" data-i18n="radarLayerTitle">Rain Radar</span>
+        <span id="radar-time-badge" class="radar-time-badge">LIVE</span>
+      </div>
+      <div id="radar-timestamp" class="radar-timestamp">--:--</div>
+      <button id="radar-close-btn" class="radar-close-btn" title="Close Radar" aria-label="Close radar">&times;</button>
+    </div>
+
+    <div class="radar-controls-row">
+      <button id="radar-prev-btn" class="radar-ctrl-btn" title="Step Back">⏮</button>
+      <button id="radar-play-btn" class="radar-ctrl-btn radar-play-btn" title="Play / Pause">⏸</button>
+      <button id="radar-next-btn" class="radar-ctrl-btn" title="Step Forward">⏭</button>
+      <div class="radar-slider-wrap">
+        <input id="radar-slider" type="range" min="0" max="0" value="0" step="1" aria-label="Radar timeline" />
+      </div>
+    </div>
+
+    <div class="radar-legend-row">
+      <span class="radar-legend-label" data-i18n="radarLight">Light</span>
+      <div class="radar-legend-gradient"></div>
+      <span class="radar-legend-label" data-i18n="radarHeavy">Torrential</span>
+    </div>
+  </div>
+
   <header id="topbar">
     <div class="brand">
       <span class="logo">🌊</span>

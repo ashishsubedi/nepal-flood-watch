@@ -12,7 +12,7 @@ const I18N = {
     checkRoute: 'Check status',
     allCorridors: 'All Routes', intercityRoutes: 'Popular Corridors', majorHighways: 'Highway Network',
     scrollTop: 'Top',
-    open: '✅ Safe — road open', nightBanned: '⚠️ Night travel banned / single-lane', blocked: '⛔ Blocked by landslide',
+    open: '✅ Safe — road open', caution: '🟡 Caution — verify before travel', nightBanned: '⚠️ Night travel banned / single-lane', blocked: '⛔ Blocked by landslide',
     topRouteBadge: '★ Top Route',
     calculatedBadge: '⚡ Calculated',
     callNow: 'Call now', updated: 'Updated', stations: 'gauges', noRoute: 'Select both origin and destination.',
@@ -22,6 +22,20 @@ const I18N = {
     noDangerIncidents: '🟢 No active critical flood or landslide incidents reported',
     mapHazardsOnly: 'Hazards Only',
     mapAllGauges: 'All Gauges',
+    radarLayerTitle: 'Rain Radar',
+    radarLive: 'LIVE',
+    radarForecast: 'FORECAST',
+    radarPast: 'PAST',
+    radarLight: 'Light (Drizzle)',
+    radarHeavy: 'Torrential',
+    radarPlay: 'Play',
+    radarPause: 'Pause',
+    radarLoading: 'Loading radar…',
+    readNews: 'Read Article',
+    sourceTagDor: 'DoR Notice',
+    sourceTagBipad: 'BIPAD Hazard',
+    sourceTagNews: 'News Alert',
+    sourceTagOverride: 'Verified Update',
   },
   ne: {
     appTitle: 'नेपाल बाढी तथा सडक अवस्था',
@@ -36,7 +50,7 @@ const I18N = {
     checkRoute: 'अवस्था हेर्नुहोस्',
     allCorridors: 'सबै मार्गहरू', intercityRoutes: 'प्रसिद्ध मुख्य करिडोरहरू', majorHighways: 'राजमार्ग सञ्जाल',
     scrollTop: 'माथि',
-    open: '✅ सुरक्षित — बाटो खुला', nightBanned: '⚠️ रात्रिकालीन यात्रा प्रतिबन्धित / एकल लेन', blocked: '⛔ पहिरोले अवरुद्ध',
+    open: '✅ सुरक्षित — बाटो खुला', caution: '🟡 सतर्कता — यात्रा अघि बुझ्नुहोस्', nightBanned: '⚠️ रात्रिकालीन यात्रा प्रतिबन्धित / एकल लेन', blocked: '⛔ पहिरोले अवरुद्ध',
     topRouteBadge: '★ मुख्य मार्ग',
     calculatedBadge: '⚡ गणना गरिएको मार्ग',
     callNow: 'अहिले कल गर्नुहोस्', updated: 'अपडेट', stations: 'गेज', noRoute: 'सुरु र गन्तव्य दुवै छान्नुहोस्।',
@@ -46,6 +60,20 @@ const I18N = {
     noDangerIncidents: '🟢 हाल कुनै गम्भीर बाढी वा पहिरोका घटना रिपोर्ट गरिएको छैन',
     mapHazardsOnly: 'खतरा मात्र',
     mapAllGauges: 'सबै गेज',
+    radarLayerTitle: 'वर्षा रडार',
+    radarLive: 'प्रत्यक्ष',
+    radarForecast: 'पूर्वानुमान',
+    radarPast: 'विगत',
+    radarLight: 'हल्का वर्षा',
+    radarHeavy: 'मुसलधारे',
+    radarPlay: 'प्ले',
+    radarPause: 'रोक्नुहोस्',
+    radarLoading: 'रडार लोड हुँदैछ…',
+    readNews: 'समाचार पढ्नुहोस्',
+    sourceTagDor: 'सडक विभाग सूचना',
+    sourceTagBipad: 'विपद् घटना',
+    sourceTagNews: 'समाचार अपडेट',
+    sourceTagOverride: 'प्रमाणित अवस्था',
   },
 };
 
@@ -107,8 +135,18 @@ function fmtLegs(count) {
   return lang === 'ne' ? `${toNepaliDigits(count)} खण्ड` : `${count} legs`;
 }
 
-const SEV_COLOR = { danger: '#ef4444', warning: '#f59e0b', normal: '#10b981', unknown: '#7a8aa0' };
+const SEV_COLOR = {
+  danger: '#ef4444',
+  blocked: '#ef4444',
+  warning: '#f59e0b',
+  'night-banned': '#f97316',
+  caution: '#eab308',
+  normal: '#10b981',
+  open: '#10b981',
+  unknown: '#7a8aa0',
+};
 const SEV_RANK = { danger: 3, warning: 2, normal: 1, unknown: 0 };
+const HW_RANK = { blocked: 4, 'night-banned': 3, caution: 2, open: 1, normal: 1, unknown: 0 };
 
 const isMobile = window.innerWidth < 768;
 const map = L.map('map', {
@@ -122,6 +160,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18,
 
 map.createPane('radarPane');
 map.getPane('radarPane').style.zIndex = 350;
+map.getPane('radarPane').style.pointerEvents = 'none';
 
 let userInteractedWithMap = false;
 map.on('dragstart zoomstart', () => { userInteractedWithMap = true; });
@@ -290,19 +329,41 @@ const routeCache = new Map();
 function fmt(n, d = 2) { return n == null ? '—' : (lang === 'ne' ? toNepaliDigits(Number(n).toFixed(d)) : Number(n).toFixed(d)); }
 
 function selectItem(id, lat, lon, zoom = 11, marker = null, targetTab = null) {
-  selectedId = id;
-  if (targetTab) {
-    switchTab(targetTab);
+  selectedId = String(id);
+  if (targetTab && targetTab !== currentTab) {
+    currentTab = targetTab;
+    document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === targetTab));
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + targetTab));
+    updateScrollTopButton();
+    renderMarkers();
   }
   document.querySelectorAll('.card').forEach((c) => {
     c.classList.toggle('selected', c.dataset.id === String(id));
   });
   if (lat != null && lon != null) {
-    map.flyTo([lat, lon], zoom, { duration: 0.6 });
+    map.flyTo([lat, lon], zoom, { duration: 0.5 });
   }
-  if (marker) {
-    marker.openPopup();
+
+  // Open the tooltip popup on the map
+  let activeMarker = marker;
+  if (!activeMarker || !activeMarker._map) {
+    if (String(id).startsWith('inc-')) {
+      activeMarker = incidentMarkers.get(String(id).replace('inc-', ''));
+    } else if (String(id).startsWith('hw-')) {
+      activeMarker = highwayMarkers.get(String(id).replace('hw-', ''));
+    } else {
+      activeMarker = stationMarkers.get(String(id));
+    }
   }
+
+  if (activeMarker) {
+    setTimeout(() => {
+      try {
+        activeMarker.openPopup();
+      } catch (_) {}
+    }, 40);
+  }
+
   const el = document.querySelector(`.card[data-id="${id}"]`);
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -311,22 +372,68 @@ function selectItem(id, lat, lon, zoom = 11, marker = null, targetTab = null) {
 
 function popupNode(s) {
   const d = document.createElement('div');
+  d.className = 'popup-station';
   const b = document.createElement('b');
   b.textContent = s.name;
   d.appendChild(b);
   d.appendChild(document.createElement('br'));
   const meta = document.createElement('div');
+  meta.style.fontSize = '11px';
+  meta.style.color = '#7a8aa0';
+  meta.style.marginTop = '2px';
   meta.textContent = [s.district, s.basin ? s.basin + (lang === 'ne' ? ' जलाधार' : ' basin') : ''].filter(Boolean).join(' · ');
   d.appendChild(meta);
-  const wl = document.createElement('div');
-  wl.textContent = (lang === 'ne' ? 'जलस्तर: ' : 'Water level: ') + `${fmt(s.waterLevel)} m`;
-  d.appendChild(wl);
-  const wd = document.createElement('div');
-  wd.textContent = (lang === 'ne' ? `चेतावनी: ${fmt(s.warningLevel)} m · खतरा: ${fmt(s.dangerLevel)} m` : `Warning: ${fmt(s.warningLevel)} m · Danger: ${fmt(s.dangerLevel)} m`);
-  d.appendChild(wd);
-  const st = document.createElement('div');
-  st.textContent = (lang === 'ne' ? 'अवस्था: ' : 'Status: ') + `${s.status || '—'}`;
-  d.appendChild(st);
+
+  const statusColor = SEV_COLOR[s.severity] || '#10b981';
+  const statusLabel = s.severity === 'danger' ? t('legendAbove')
+    : s.severity === 'warning' ? t('legendWarn')
+    : t('legendBelow');
+
+  const lvl = document.createElement('div');
+  lvl.style.marginTop = '5px';
+  lvl.style.fontSize = '12px';
+  lvl.innerHTML = `<span style="color:${statusColor};font-weight:700;">${statusLabel}</span>: <b>${fmt(s.waterLevel)} m</b>`;
+  d.appendChild(lvl);
+
+  if (s.warningLevel != null || s.dangerLevel != null) {
+    const thresh = document.createElement('div');
+    thresh.style.fontSize = '11px';
+    thresh.style.color = '#94a3b8';
+    thresh.style.marginTop = '2px';
+    thresh.textContent = `${lang === 'ne' ? 'चेतावनी' : 'Warn'}: ${fmt(s.warningLevel)} m · ${lang === 'ne' ? 'खतरा' : 'Danger'}: ${fmt(s.dangerLevel)} m`;
+    d.appendChild(thresh);
+  }
+
+  return d;
+}
+
+function popupHighwayNode(h) {
+  const d = document.createElement('div');
+  d.className = 'popup-highway';
+  const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
+  const note = lang === 'ne' ? (h.noteNe || h.noteEn) : (h.noteEn || h.noteNe);
+  const fromDisp = toPlaceName(h.from);
+  const toDisp = toPlaceName(h.to);
+  const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
+  const statusColor = SEV_COLOR[h.status] || '#10b981';
+
+  let sourceHtml = '';
+  if (h.statusSource === 'dor' && h.dorUrl) {
+    const eta = h.dorNotice?.repairEta ? ` (${lang === 'ne' ? 'अनुमानित' : 'ETA'}: ${h.dorNotice.repairEta})` : '';
+    sourceHtml = `<div style="margin-top:8px;"><a href="${h.dorUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#064e3b;color:#34d399;border:1px solid rgba(52,211,153,0.35);border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">🏛️ ${t('sourceTagDor')}${eta} ➔</a></div>`;
+  } else if (h.statusSource === 'bipad' && h.incidentBipadUrl) {
+    sourceHtml = `<div style="margin-top:8px;"><a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#1b2a3a;color:#2f9bff;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">🏛️ ${t('officialReport')} (${h.incidentDistKm} km)</a></div>`;
+  } else if (h.statusSource === 'news' && h.newsUrl) {
+    sourceHtml = `<div style="margin-top:8px;"><a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#1b2a3a;color:#38bdf8;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">📰 ${h.newsSource || t('readNews')} ➔</a></div>`;
+  }
+
+  d.innerHTML = `
+    <b>${name}</b><br>
+    <span style="font-size:11px;color:#7a8aa0;">${fromDisp} ➔ ${toDisp}${h.distanceKm ? ` · ${fmtDist(h.distanceKm)}` : ''}</span>
+    <div style="margin-top:5px;font-size:12px;font-weight:700;color:${statusColor};">${label[h.status] || h.status}</div>
+    <div style="margin-top:4px;font-size:11px;color:#cbd5e1;line-height:1.3;">${note}</div>
+    ${sourceHtml}
+  `;
   return d;
 }
 
@@ -364,7 +471,7 @@ function renderMarkers() {
 
   const bounds = [];
   const dangerGauges = allStations.filter(s => s.severity === 'danger' || s.severity === 'warning');
-  const blockedHighways = highways.filter(h => h.status === 'blocked' || h.status === 'night-banned');
+  const blockedHighways = highways.filter(h => h.status === 'blocked' || h.status === 'night-banned' || h.status === 'caution');
   const totalHazards = dangerGauges.length + blockedHighways.length + incidents.length;
 
   updateMapFilterButton(totalHazards);
@@ -403,6 +510,9 @@ function renderMarkers() {
     });
     m.addTo(stationLayer);
     stationMarkers.set(String(s.id), m);
+    if (selectedId === String(s.id)) {
+      setTimeout(() => m.openPopup(), 50);
+    }
     if (isDanger || isWarning) bounds.push([s.lat, s.lon]);
   }
 
@@ -410,17 +520,15 @@ function renderMarkers() {
     if (h.lat == null || h.lon == null) continue;
     const isBlocked = h.status === 'blocked';
     const isNightBanned = h.status === 'night-banned';
-    const color = isBlocked ? '#ef4444' : isNightBanned ? '#f59e0b' : '#10b981';
+    const isCaution = h.status === 'caution';
+    const color = isBlocked ? '#ef4444' : isNightBanned ? '#f97316' : isCaution ? '#eab308' : '#10b981';
     const icon = L.divIcon({
       className: 'highway-badge-icon',
-      html: `<div style="background:${color};width:${isBlocked ? 14 : 11}px;height:${isBlocked ? 14 : 11}px;border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>`,
+      html: `<div style="background:${color};width:${isBlocked ? 14 : isCaution || isNightBanned ? 12 : 11}px;height:${isBlocked ? 14 : isCaution || isNightBanned ? 12 : 11}px;border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.6);"></div>`,
       iconSize: [14, 14]
     });
-    const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
-    const fromDisp = toPlaceName(h.from);
-    const toDisp = toPlaceName(h.to);
     const m = L.marker([h.lat, h.lon], { icon })
-      .bindPopup(`<b>${name}</b><br><span style="font-size:11px;">${fromDisp} ➔ ${toDisp}</span><br><b>${h.status.toUpperCase()}</b>`);
+      .bindPopup(popupHighwayNode(h));
     m.on('click', () => {
       selectItem('hw-' + h.id, h.lat, h.lon, 11, m, 'highways');
       const selF = document.getElementById('route-from'), selT = document.getElementById('route-to');
@@ -432,6 +540,9 @@ function renderMarkers() {
     });
     m.addTo(hazardLayer);
     highwayMarkers.set(String(h.id), m);
+    if (selectedId === ('hw-' + h.id)) {
+      setTimeout(() => m.openPopup(), 50);
+    }
   }
 
   for (const inc of incidents) {
@@ -470,6 +581,9 @@ function renderMarkers() {
     });
     m.addTo(hazardLayer);
     incidentMarkers.set(String(inc.id), m);
+    if (selectedId === ('inc-' + inc.id)) {
+      setTimeout(() => m.openPopup(), 50);
+    }
   }
 
   if (bounds.length && !selectedId && !userInteractedWithMap) {
@@ -605,8 +719,6 @@ function renderIncidents(filter = '') {
 }
 
 // ---- Highway Graph & Dynamic Route Calculation Engine --------------------
-const HW_RANK = { blocked: 3, 'night-banned': 2, open: 1 };
-
 function buildHighwayGraph() {
   highwayGraph.clear();
   routeCache.clear();
@@ -658,7 +770,7 @@ function calculateDijkstra(startNode, endNode) {
       if (!unvisited.has(edge.to)) continue;
 
       const status = edge.segment.status || 'open';
-      const penalty = status === 'blocked' ? 1000 : status === 'night-banned' ? 1.5 : 1.0;
+      const penalty = status === 'blocked' ? 1000 : status === 'night-banned' ? 1.5 : status === 'caution' ? 1.2 : 1.0;
       const weight = (edge.segment.distanceKm || 50) * penalty;
 
       const alt = distances.get(current) + weight;
@@ -851,17 +963,55 @@ function highlightRouteOnMap(route) {
 function createHighwayCard(h) {
   const div = document.createElement('div');
   div.className = 'card ' + h.status;
-  const label = { open: t('open'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
+  const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
   const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
   const note = lang === 'ne' ? (h.noteNe || h.noteEn) : (h.noteEn || h.noteNe);
   const codeBadge = h.code ? `<span class="badge-code">${h.code}</span>` : '';
   const distBadge = h.distanceKm ? `<span class="badge-distance">${fmtDist(h.distanceKm)}</span>` : '';
+
+  let dynamicBadge = '';
+  let actionLink = '';
+
+  if (h.statusSource === 'dor') {
+    const isRed = h.status === 'blocked';
+    const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(52,211,153,0.18)';
+    const colorFg = isRed ? '#ef4444' : '#34d399';
+    const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)';
+    const tagText = isRed ? (lang === 'ne' ? 'सडक विभाग: बन्द' : 'DoR Closed') : (lang === 'ne' ? 'सडक विभाग: एकतर्फी' : 'DoR One-Way');
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${tagText}</span>`;
+    if (h.dorUrl) {
+      actionLink = `<a href="${h.dorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" onclick="event.stopPropagation()">🏛️ ${t('sourceTagDor')}</a>`;
+    }
+  } else if (h.statusSource === 'bipad') {
+    const isRed = h.status === 'blocked';
+    const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.18)';
+    const colorFg = isRed ? '#ef4444' : '#eab308';
+    const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(234,179,8,0.4)';
+    const tagText = isRed ? (lang === 'ne' ? 'पहिरो' : 'Landslide') : (lang === 'ne' ? 'विपद् सतर्कता' : 'Hazard Alert');
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${tagText} (${h.incidentDistKm} km)</span>`;
+    if (h.incidentBipadUrl) {
+      actionLink = `<a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" onclick="event.stopPropagation()">🏛️ ${t('officialReport')}</a>`;
+    }
+  } else if (h.statusSource === 'news') {
+    const isRed = h.status === 'blocked';
+    const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(56,189,248,0.18)';
+    const colorFg = isRed ? '#ef4444' : '#38bdf8';
+    const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(56,189,248,0.4)';
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">📰 ${h.newsSource || t('sourceTagNews')}</span>`;
+    if (h.newsUrl) {
+      actionLink = `<a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn news" onclick="event.stopPropagation()">📰 ${t('readNews')}</a>`;
+    }
+  } else if (h.statusSource === 'override') {
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(168,85,247,0.18);color:#a855f7;border:1px solid rgba(168,85,247,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🛠️ ${t('sourceTagOverride')}</span>`;
+  }
+
   const fromDisp = toPlaceName(h.from);
   const toDisp = toPlaceName(h.to);
 
-  div.innerHTML = `<div class="name"><span>${codeBadge}${name}</span> <span>${distBadge} <span class="badge-type">${fromDisp}–${toDisp}</span></span></div>
+  div.innerHTML = `<div class="name"><span>${codeBadge}${name}${dynamicBadge}</span> <span>${distBadge} <span class="badge-type">${fromDisp}–${toDisp}</span></span></div>
     <div class="lvl">${label[h.status] || h.status}</div>
-    <div class="meta">${note}</div>`;
+    <div class="meta">${note}</div>
+    ${actionLink ? `<div class="hw-card-actions">${actionLink}</div>` : ''}`;
 
   div.onclick = () => {
     const selF = document.getElementById('route-from'), selT = document.getElementById('route-to');
@@ -879,7 +1029,7 @@ function createCompositeRouteCard(r) {
   const route = findRoute(r.from, r.to) || r;
   const worst = route.status || 'open';
   div.className = 'card ' + worst;
-  const label = { open: t('open'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
+  const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
   const note = lang === 'ne' ? (route.noteNe || route.noteEn || '') : (route.noteEn || route.noteNe || '');
   const distBadge = route.distanceKm ? `<span class="badge-distance">${fmtDist(route.distanceKm)}</span>` : '';
   const preBadge = `<span class="badge-fastpath">${t('topRouteBadge')}</span>`;
@@ -916,12 +1066,21 @@ function renderHighways() {
 
   if (hwFilter === 'all' || hwFilter === 'composite') {
     if (precomputedRoutes.length) {
+      const sortedRoutes = [...precomputedRoutes].sort((a, b) => {
+        const routeA = findRoute(a.from, a.to) || a;
+        const routeB = findRoute(b.from, b.to) || b;
+        const rankA = HW_RANK[routeA.status] || 0;
+        const rankB = HW_RANK[routeB.status] || 0;
+        if (rankB !== rankA) return rankB - rankA;
+        return (routeB.distanceKm || 0) - (routeA.distanceKm || 0);
+      });
+
       const h2 = document.createElement('h2');
       h2.className = 'subhead';
-      const countStr = lang === 'ne' ? toNepaliDigits(precomputedRoutes.length) : precomputedRoutes.length;
+      const countStr = lang === 'ne' ? toNepaliDigits(sortedRoutes.length) : sortedRoutes.length;
       h2.textContent = t('intercityRoutes') + ` (${countStr})`;
       frag.appendChild(h2);
-      for (const r of precomputedRoutes) {
+      for (const r of sortedRoutes) {
         frag.appendChild(createCompositeRouteCard(r));
       }
     }
@@ -929,12 +1088,21 @@ function renderHighways() {
 
   if (hwFilter === 'all' || hwFilter === 'highways') {
     if (highways.length) {
+      const sortedHighways = [...highways].sort((a, b) => {
+        const rankA = HW_RANK[a.status] || 0;
+        const rankB = HW_RANK[b.status] || 0;
+        if (rankB !== rankA) return rankB - rankA;
+        const nameA = (lang === 'ne' ? (a.nameNe || a.nameEn) : (a.nameEn || a.nameNe)) || '';
+        const nameB = (lang === 'ne' ? (b.nameNe || b.nameEn) : (b.nameEn || b.nameNe)) || '';
+        return nameA.localeCompare(nameB);
+      });
+
       const h2 = document.createElement('h2');
       h2.className = 'subhead';
-      const countStr = lang === 'ne' ? toNepaliDigits(highways.length) : highways.length;
+      const countStr = lang === 'ne' ? toNepaliDigits(sortedHighways.length) : sortedHighways.length;
       h2.textContent = t('majorHighways') + ` (${countStr})`;
       frag.appendChild(h2);
-      for (const h of highways) {
+      for (const h of sortedHighways) {
         frag.appendChild(createHighwayCard(h));
       }
     }
@@ -1016,7 +1184,7 @@ function checkRoute() {
     box.classList.remove('hidden');
     return;
   }
-  const label = { open: t('open'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
+  const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
 
   const route = findRoute(from, to);
 
@@ -1108,41 +1276,218 @@ async function loadIncidents() {
 }
 
 // ---- RainViewer radar ----
-let radarLayer = null, radarTimer = null, radarFrames = null;
+let radarMetadata = null;
+let radarFrames = []; // [{ time: number, path: string, isForecast: boolean, url: string }]
+let radarTileLayers = []; // [L.tileLayer]
+let radarCurrentIndex = -1;
+let radarTimer = null;
+let radarIsPlaying = false;
+const radarAnimationInterval = 850; // ms per frame
+
 async function loadRadar() {
   try {
-    const j = await (await fetch('https://api.rainviewer.com/public/weather-maps.json')).json();
+    const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+    if (!res.ok) throw new Error('Failed to fetch radar metadata');
+    const j = await res.json();
+    radarMetadata = j;
     const host = j.host || 'https://tilecache.rainviewer.com';
     const past = (j.radar && j.radar.past) || [];
     const nowcast = (j.radar && j.radar.nowcast) || [];
-    radarFrames = past
-      .concat(nowcast)
-      .map((f) => `${host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`);
-  } catch (_) { radarFrames = null; }
-}
-function showRadar(on) {
-  const btn = document.getElementById('radar-toggle');
-  if (!on) {
-    if (radarLayer) map.removeLayer(radarLayer); radarLayer = null;
-    clearInterval(radarTimer); btn.classList.remove('on'); return;
+
+    const frames = [];
+    past.forEach((f) => {
+      frames.push({
+        time: f.time,
+        path: f.path,
+        isForecast: false,
+        url: `${host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`
+      });
+    });
+    nowcast.forEach((f) => {
+      frames.push({
+        time: f.time,
+        path: f.path,
+        isForecast: true,
+        url: `${host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`
+      });
+    });
+
+    radarFrames = frames;
+    setupRadarSlider();
+  } catch (err) {
+    console.warn('Radar metadata load failed:', err);
+    radarFrames = [];
   }
-  if (!radarFrames || !radarFrames.length) { btn.classList.remove('on'); return; }
-  let i = 0;
-  const addFrame = () => {
-    if (!radarLayer) {
-      radarLayer = L.tileLayer(radarFrames[i], {
-        pane: 'radarPane',
-        opacity: 0.7,
-        maxNativeZoom: 10,
-        maxZoom: 18,
-        attribution: 'RainViewer'
-      }).addTo(map);
+}
+
+function setupRadarSlider() {
+  const slider = document.getElementById('radar-slider');
+  if (!slider || !radarFrames.length) return;
+  slider.min = '0';
+  slider.max = String(radarFrames.length - 1);
+  if (radarCurrentIndex >= 0) {
+    slider.value = String(radarCurrentIndex);
+  } else {
+    slider.value = String(radarFrames.length - 1);
+  }
+}
+
+function initRadarTileLayers() {
+  destroyRadarTileLayers();
+  if (!radarFrames.length) return;
+
+  const pane = map.getPane('radarPane');
+  if (pane) pane.style.pointerEvents = 'none';
+
+  radarTileLayers = radarFrames.map((frame) => {
+    return L.tileLayer(frame.url, {
+      pane: 'radarPane',
+      opacity: 0,
+      maxNativeZoom: 12,
+      maxZoom: 19,
+      tileSize: 256,
+      attribution: 'Weather Radar &copy; <a href="https://www.rainviewer.com/" target="_blank" rel="noopener noreferrer">RainViewer</a>'
+    }).addTo(map);
+  });
+}
+
+function destroyRadarTileLayers() {
+  radarTileLayers.forEach((layer) => {
+    try {
+      if (layer && map.hasLayer(layer)) {
+        map.removeLayer(layer);
+      }
+    } catch (_) {}
+  });
+  radarTileLayers = [];
+}
+
+function formatRadarTime(unixSec, isForecast) {
+  if (!unixSec) return '--:--';
+  const d = new Date(unixSec * 1000);
+  const now = Date.now();
+  const diffMinutes = Math.round((unixSec * 1000 - now) / 60000);
+
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  let relStr = '';
+  if (Math.abs(diffMinutes) <= 6) {
+    relStr = lang === 'ne' ? 'अहिले' : 'Live';
+  } else if (diffMinutes < 0) {
+    relStr = lang === 'ne' ? `${Math.abs(diffMinutes)}मिनेट अघि` : `${Math.abs(diffMinutes)}m ago`;
+  } else {
+    relStr = lang === 'ne' ? `+${diffMinutes}मिनेट` : `+${diffMinutes}m`;
+  }
+
+  return `${timeStr} (${relStr})`;
+}
+
+function setRadarFrame(index, updateSlider = true) {
+  if (!radarFrames.length || index < 0 || index >= radarFrames.length) return;
+
+  radarCurrentIndex = index;
+  const frame = radarFrames[index];
+
+  radarTileLayers.forEach((layer, i) => {
+    if (i === index) {
+      layer.setOpacity(0.75);
     } else {
-      radarLayer.setUrl(radarFrames[i]);
+      layer.setOpacity(0);
     }
-    i = (i + 1) % radarFrames.length;
-  };
-  addFrame(); radarTimer = setInterval(addFrame, 1500); btn.classList.add('on');
+  });
+
+  const slider = document.getElementById('radar-slider');
+  if (slider && updateSlider) {
+    slider.value = String(index);
+  }
+
+  const timeEl = document.getElementById('radar-timestamp');
+  const badgeEl = document.getElementById('radar-time-badge');
+  if (timeEl) {
+    timeEl.textContent = formatRadarTime(frame.time, frame.isForecast);
+  }
+  if (badgeEl) {
+    const liveIndex = radarFrames.findIndex((f) => f.isForecast) !== -1
+      ? radarFrames.findIndex((f) => f.isForecast) - 1
+      : radarFrames.length - 1;
+
+    if (frame.isForecast) {
+      badgeEl.textContent = t('radarForecast');
+      badgeEl.classList.add('forecast');
+    } else if (index === liveIndex) {
+      badgeEl.textContent = t('radarLive');
+      badgeEl.classList.remove('forecast');
+    } else {
+      badgeEl.textContent = t('radarPast');
+      badgeEl.classList.remove('forecast');
+    }
+  }
+}
+
+function playRadar() {
+  if (radarTimer) clearInterval(radarTimer);
+  radarIsPlaying = true;
+  const playBtn = document.getElementById('radar-play-btn');
+  if (playBtn) playBtn.textContent = '⏸';
+
+  radarTimer = setInterval(() => {
+    if (!radarFrames.length) return;
+    let nextIdx = radarCurrentIndex + 1;
+    if (nextIdx >= radarFrames.length) {
+      nextIdx = 0;
+    }
+    setRadarFrame(nextIdx);
+  }, radarAnimationInterval);
+}
+
+function pauseRadar() {
+  if (radarTimer) clearInterval(radarTimer);
+  radarTimer = null;
+  radarIsPlaying = false;
+  const playBtn = document.getElementById('radar-play-btn');
+  if (playBtn) playBtn.textContent = '▶';
+}
+
+function toggleRadarPlay() {
+  if (radarIsPlaying) {
+    pauseRadar();
+  } else {
+    playRadar();
+  }
+}
+
+async function showRadar(on) {
+  const btn = document.getElementById('radar-toggle');
+  const player = document.getElementById('radar-player');
+
+  if (!on) {
+    pauseRadar();
+    destroyRadarTileLayers();
+    if (btn) btn.classList.remove('on');
+    if (player) player.classList.add('hidden');
+    return;
+  }
+
+  if (btn) btn.classList.add('on');
+  if (player) player.classList.remove('hidden');
+
+  if (!radarFrames.length) {
+    const timeEl = document.getElementById('radar-timestamp');
+    if (timeEl) timeEl.textContent = t('radarLoading');
+    await loadRadar();
+    if (!radarFrames.length) {
+      if (btn) btn.classList.remove('on');
+      if (player) player.classList.add('hidden');
+      return;
+    }
+  }
+
+  initRadarTileLayers();
+  setupRadarSlider();
+
+  const liveIndex = radarFrames.length > 0 ? radarFrames.length - 1 : 0;
+  setRadarFrame(liveIndex);
+  playRadar();
 }
 
 function switchTab(tabName) {
@@ -1170,6 +1515,27 @@ function applyLang() {
   renderMarkers();
   const box = document.getElementById('route-verdict');
   if (!box.classList.contains('hidden')) checkRoute();
+
+  if (radarFrames.length && radarCurrentIndex >= 0) {
+    const frame = radarFrames[radarCurrentIndex];
+    if (frame) {
+      const timeEl = document.getElementById('radar-timestamp');
+      const badgeEl = document.getElementById('radar-time-badge');
+      if (timeEl) timeEl.textContent = formatRadarTime(frame.time, frame.isForecast);
+      if (badgeEl) {
+        const liveIndex = radarFrames.findIndex((f) => f.isForecast) !== -1
+          ? radarFrames.findIndex((f) => f.isForecast) - 1
+          : radarFrames.length - 1;
+        if (frame.isForecast) {
+          badgeEl.textContent = t('radarForecast');
+        } else if (radarCurrentIndex === liveIndex) {
+          badgeEl.textContent = t('radarLive');
+        } else {
+          badgeEl.textContent = t('radarPast');
+        }
+      }
+    }
+  }
 }
 
 // ---- scroll to top handler ----
@@ -1266,6 +1632,41 @@ document.getElementById('lang-switch').addEventListener('click', () => {
 });
 
 document.getElementById('radar-toggle').addEventListener('click', () => showRadar(!document.getElementById('radar-toggle').classList.contains('on')));
+
+const radarCloseBtn = document.getElementById('radar-close-btn');
+if (radarCloseBtn) radarCloseBtn.addEventListener('click', () => showRadar(false));
+
+const radarPlayBtn = document.getElementById('radar-play-btn');
+if (radarPlayBtn) radarPlayBtn.addEventListener('click', toggleRadarPlay);
+
+const radarPrevBtn = document.getElementById('radar-prev-btn');
+if (radarPrevBtn) {
+  radarPrevBtn.addEventListener('click', () => {
+    pauseRadar();
+    if (!radarFrames.length) return;
+    const prevIdx = radarCurrentIndex <= 0 ? radarFrames.length - 1 : radarCurrentIndex - 1;
+    setRadarFrame(prevIdx);
+  });
+}
+
+const radarNextBtn = document.getElementById('radar-next-btn');
+if (radarNextBtn) {
+  radarNextBtn.addEventListener('click', () => {
+    pauseRadar();
+    if (!radarFrames.length) return;
+    const nextIdx = radarCurrentIndex >= radarFrames.length - 1 ? 0 : radarCurrentIndex + 1;
+    setRadarFrame(nextIdx);
+  });
+}
+
+const radarSlider = document.getElementById('radar-slider');
+if (radarSlider) {
+  radarSlider.addEventListener('input', () => {
+    pauseRadar();
+    const idx = parseInt(radarSlider.value, 10);
+    setRadarFrame(idx, false);
+  });
+}
 
 const mapModeBtn = document.getElementById('map-mode-toggle');
 if (mapModeBtn) {
