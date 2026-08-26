@@ -37,6 +37,8 @@ const I18N = {
     sourceTagNews: 'News Alert',
     sourceTagOverride: 'Verified Update',
     detourBadge: 'Alternate Detour',
+    disclaimerTitle: 'Travel Advisory & Data Disclaimer',
+    disclaimerText: 'Automated situational awareness tool aggregating open data from DHM, DoR, BIPAD, and public media. Conditions in mountainous terrain change rapidly. Always verify road status with local authorities, Nepal Police (100 / 103), or official transit checkpoints before travelling.',
   },
   ne: {
     appTitle: 'नेपाल बाढी तथा सडक अवस्था',
@@ -76,6 +78,8 @@ const I18N = {
     sourceTagNews: 'समाचार अपडेट',
     sourceTagOverride: 'प्रमाणित अवस्था',
     detourBadge: 'वैकल्पिक मार्ग (डिटुर)',
+    disclaimerTitle: 'यात्रा सल्लाह तथा तथ्याङ्क अस्वीकरण',
+    disclaimerText: 'यो ड्यासबोर्ड जल तथा मौसम विज्ञान विभाग (DHM), सडक विभाग (DoR), विपद् पोर्टल (BIPAD) र सार्वजनिक सञ्चारमाध्यमको खुला तथ्याङ्कमा आधारित स्वचालित प्रणाली हो। पहाडी बाटो तथा वर्षायाममा अवस्था द्रुत गतिमा परिवर्तन हुन सक्छ। यात्रा गर्नुअघि स्थानीय प्रशासन, नेपाल प्रहरी (१०० / १०३) वा आधिकारिक निकायसँग अवस्था बुझेर मात्र हिँड्नुहोस्।',
   },
 };
 

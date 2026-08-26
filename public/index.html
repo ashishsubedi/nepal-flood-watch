@@ -88,6 +88,15 @@
           <select id="route-to"></select>
         </div>
       </div>
+      <div class="disclaimer-banner">
+        <div class="disclaimer-banner-header">
+          <span class="disclaimer-banner-icon">⚠️</span>
+          <span class="disclaimer-banner-title" data-i18n="disclaimerTitle">Travel Advisory & Data Disclaimer</span>
+        </div>
+        <p class="disclaimer-banner-text" data-i18n="disclaimerText">
+          Automated situational awareness tool aggregating open data from DHM, DoR, BIPAD, and public media. Conditions in mountainous terrain change rapidly. Always verify road status with local authorities, Nepal Police (100 / 103), or official transit checkpoints before travelling.
+        </p>
+      </div>
       <div id="route-verdict" class="verdict hidden"></div>
       <div id="highway-list" class="card-list"></div>
     </section>
@@ -116,7 +125,12 @@
     </section>
 
     <footer class="app-footer">
-      <span>Open Data Initiative · By <a href="https://asubedi.com.np" target="_blank" rel="noopener noreferrer">Ashish Subedi (asubedi.com.np)</a></span>
+      <div class="footer-disclaimer" data-i18n="disclaimerText">
+        Automated situational awareness tool aggregating open data from DHM, DoR, BIPAD, and public media. Conditions in mountainous terrain change rapidly. Always verify road status with local authorities, Nepal Police (100 / 103), or official transit checkpoints before travelling.
+      </div>
+      <div class="footer-meta">
+        <span>Open Data Initiative · By <a href="https://asubedi.com.np" target="_blank" rel="noopener noreferrer">Ashish Subedi (asubedi.com.np)</a></span>
+      </div>
     </footer>
 
     <button id="scroll-top-btn" class="scroll-top-btn" aria-label="Scroll to top">
