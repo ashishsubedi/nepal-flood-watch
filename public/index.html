@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Nepal Flood & Highway Watch</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo">🌊</span>
+      <div>
+        <div class="title" data-i18n="appTitle">Nepal Flood & Highway Watch</div>
+        <div id="status" class="status">loading…</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="radar-toggle" class="chip" data-i18n="radar">Radar</button>
+      <button id="lang-switch" class="chip">नेपाली</button>
+    </div>
+  </header>
+
+  <div id="sheet" class="sheet">
+    <div id="sheet-handle" class="sheet-handle"></div>
+    <nav id="tabs" class="tabs">
+      <button class="tab active" data-tab="highways"><span>🛣️</span><span data-i18n="tabHighways">Highways</span></button>
+      <button class="tab" data-tab="rivers"><span>🌊</span><span data-i18n="tabRivers">Rivers</span></button>
+      <button class="tab" data-tab="helplines"><span>🆘</span><span data-i18n="tabHelplines">Helplines</span></button>
+    </nav>
+
+    <!-- HIGHWAYS -->
+    <section class="tab-panel active" id="panel-highways">
+      <div class="filters">
+        <button class="chip active" data-hwfilter="all" data-i18n="allCorridors">All Routes</button>
+        <button class="chip" data-hwfilter="composite" data-i18n="intercityRoutes">Intercity Corridors</button>
+        <button class="chip" data-hwfilter="highways" data-i18n="majorHighways">Major Highways</button>
+      </div>
+      <div class="route-checker">
+        <div>
+          <label data-i18n="from">From</label>
+          <select id="route-from"></select>
+        </div>
+        <div>
+          <label data-i18n="to">To</label>
+          <select id="route-to"></select>
+        </div>
+      </div>
+      <div id="route-verdict" class="verdict hidden"></div>
+      <div id="highway-list" class="card-list"></div>
+    </section>
+
+    <!-- RIVERS -->
+    <section class="tab-panel" id="panel-rivers">
+      <div class="filters">
+        <button class="chip active" data-filter="all" data-i18n="filterAll">All</button>
+        <button class="chip" data-filter="danger" data-i18n="filterDanger">Danger Only</button>
+        <button class="chip" data-filter="incidents" data-i18n="incidents">Incidents</button>
+      </div>
+      <input id="search" type="search" placeholder="Filter by name / district…" data-i18n-ph="filterRivers" />
+      <h2 class="subhead" data-i18n="incidents">Live Incidents</h2>
+      <div id="incident-list" class="card-list"></div>
+      <h2 class="subhead" id="stations-head" data-i18n="riverStations">River Stations</h2>
+      <div id="station-list" class="card-list"></div>
+    </section>
+
+    <!-- HELPLINES -->
+    <section class="tab-panel" id="panel-helplines">
+      <div id="helpline-list" class="card-list"></div>
+    </section>
+
+    <button id="scroll-top-btn" class="scroll-top-btn" aria-label="Scroll to top">
+      <span>↑</span> <span data-i18n="scrollTop">Top</span>
+    </button>
+  </div>
+
+  <!-- IN-APP NEWS SEARCH MODAL -->
+  <div id="news-modal" class="news-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="news-modal-title">
+    <div class="news-modal">
+      <div class="news-modal-header">
+        <div class="news-modal-title-wrap">
+          <span class="news-modal-badge" data-i18n="newsBadge">📰 Live Coverage</span>
+          <h3 id="news-modal-title" class="news-modal-title">Incident News</h3>
+        </div>
+        <button id="news-modal-close" class="news-modal-close" aria-label="Close modal">×</button>
+      </div>
+
+      <div class="news-search-bar">
+        <input id="news-search-input" type="search" placeholder="Search news articles…" data-i18n-ph="searchNewsPh" />
+        <button id="news-search-submit" class="chip active" data-i18n="searchBtn">Search</button>
+      </div>
+
+      <div class="news-sources-filter">
+        <button class="chip active" data-newsfilter="all" data-i18n="newsAll">🌐 All Sources</button>
+        <button class="chip" data-newsfilter="nepali" data-i18n="newsNepali">🇳🇵 Major Nepali Media</button>
+      </div>
+
+      <div id="news-modal-body" class="news-modal-body">
+        <div id="news-loading" class="news-loading hidden">
+          <div class="spinner"></div>
+          <span data-i18n="newsSearching">Searching latest news coverage…</span>
+        </div>
+        <div id="news-results" class="news-results-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

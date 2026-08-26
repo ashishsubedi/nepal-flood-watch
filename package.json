@@ -1,0 +1,15 @@
+{
+  "name": "nepal-flood-watch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Situational-awareness dashboard for Nepal floods: live DHM river gauges + satellite map.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
