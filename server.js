@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -859,7 +860,7 @@ const PRECOMPUTED_TOP_ROUTES = [
   }
 ];
 
-// ---- Spatial Geo-Fencing Math (Option 1) --------------------------------
+// ---- Spatial Geo-Fencing Math (Great-Circle Cross-Track) ------------------
 function haversineDistKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -872,15 +873,43 @@ function haversineDistKm(lat1, lon1, lat2, lon2) {
 }
 
 function distToSegmentKm(pLat, pLon, aLat, aLon, bLat, bLon) {
-  const dAB = haversineDistKm(aLat, aLon, bLat, bLon);
-  if (dAB === 0) return haversineDistKm(pLat, pLon, aLat, aLon);
-  const dAP = haversineDistKm(aLat, aLon, pLat, pLon);
-  const dBP = haversineDistKm(bLat, bLon, pLat, pLon);
-  if (dAP * dAP > dBP * dBP + dAB * dAB) return dBP;
-  if (dBP * dBP > dAP * dAP + dAB * dAB) return dAP;
-  const s = (dAB + dAP + dBP) / 2;
-  const area = Math.sqrt(Math.max(0, s * (s - dAB) * (s - dAP) * (s - dBP)));
-  return (2 * area) / dAB;
+  const R = 6371;
+  const dAB_km = haversineDistKm(aLat, aLon, bLat, bLon);
+  if (dAB_km === 0) return haversineDistKm(pLat, pLon, aLat, aLon);
+
+  const delta12 = dAB_km / R;
+  const delta13 = haversineDistKm(aLat, aLon, pLat, pLon) / R;
+
+  // Radians
+  const phi1 = aLat * Math.PI / 180;
+  const lam1 = aLon * Math.PI / 180;
+  const phi2 = bLat * Math.PI / 180;
+  const lam2 = bLon * Math.PI / 180;
+  const phi3 = pLat * Math.PI / 180;
+  const lam3 = pLon * Math.PI / 180;
+
+  // Bearings
+  const y12 = Math.sin(lam2 - lam1) * Math.cos(phi2);
+  const x12 = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lam2 - lam1);
+  const theta12 = Math.atan2(y12, x12);
+
+  const y13 = Math.sin(lam3 - lam1) * Math.cos(phi3);
+  const x13 = Math.cos(phi1) * Math.sin(phi3) - Math.sin(phi1) * Math.cos(phi3) * Math.cos(lam3 - lam1);
+  const theta13 = Math.atan2(y13, x13);
+
+  const angleDiff = theta13 - theta12;
+  const dXt = Math.asin(Math.max(-1, Math.min(1, Math.sin(delta13) * Math.sin(angleDiff))));
+  const cosDxt = Math.cos(dXt);
+  const dAt = Math.acos(Math.max(-1, Math.min(1, Math.cos(delta13) / (cosDxt === 0 ? 1e-9 : cosDxt))));
+
+  if (Math.cos(angleDiff) < 0) {
+    return haversineDistKm(pLat, pLon, aLat, aLon);
+  }
+  if (dAt > delta12) {
+    return haversineDistKm(pLat, pLon, bLat, bLon);
+  }
+
+  return Math.abs(dXt * R);
 }
 
 function distToPolylineKm(pLat, pLon, coords) {
@@ -894,40 +923,146 @@ function distToPolylineKm(pLat, pLon, coords) {
   return minD;
 }
 
-// ---- Dynamic Highway Overrides (Priority 1 via JSON / Env Var) -----------
+// ---- Dynamic Highway Overrides (Priority 1 via Memory & Async File Store) --
 const HIGHWAY_OVERRIDES_FILE = path.join(__dirname, 'highway-overrides.json');
+let inMemoryHighwayOverrides = null;
+
+const VALID_HIGHWAY_IDS = new Set([
+  'prithvi-ktm-mugling',
+  'prithvi-mugling-pkr',
+  'narayanghat-mugling',
+  'bp-highway',
+  'kanti-lokpath',
+  'tribhuvan-highway',
+  'east-west-hetauda-chitwan',
+  'east-west-chitwan-butwal',
+  'siddhartha-pkr-butwal',
+  'siddhartha-butwal-bhairahawa',
+  'east-west-butwal-kohalpur',
+  'ratna-nepalgunj-kohalpur',
+  'ratna-kohalpur-surkhet',
+  'karnali-surkhet-jumla',
+  'east-west-kohalpur-dhangadhi',
+  'east-west-dhangadhi-mahendranagar',
+  'mahakali-dhangadhi-dadeldhura',
+  'east-west-bardibas-itahari',
+  'east-west-itahari-kakarbhitta',
+  'koshi-itahari-biratnagar',
+  'koshi-itahari-dharan',
+  'mechi-kakarbhitta-ilam',
+  'araniko-highway',
+  'pasang-lhamu',
+  'mid-hill-pkr-baglung',
+  'kaligandaki-baglung-jomsom',
+  'rapti-butwal-salyan',
+  'east-west-bardibas-janakpur',
+  'ktm-pkr',
+  'ktm-chitwan',
+  'ktm-bardibas'
+]);
+
+const VALID_STATUSES = new Set(['open', 'caution', 'night-banned', 'blocked', 'clear']);
 
 function getHighwayOverrides() {
-  let overrides = {};
+  if (inMemoryHighwayOverrides !== null) {
+    return inMemoryHighwayOverrides;
+  }
+  let overrides = Object.create(null);
   if (process.env.HIGHWAY_OVERRIDES_JSON) {
     try {
-      overrides = JSON.parse(process.env.HIGHWAY_OVERRIDES_JSON);
+      const parsed = JSON.parse(process.env.HIGHWAY_OVERRIDES_JSON);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed)) {
+          if (VALID_HIGHWAY_IDS.has(k) && v && typeof v === 'object') {
+            overrides[k] = {
+              status: v.status || 'open',
+              noteEn: String(v.noteEn || '').slice(0, 500),
+              noteNe: String(v.noteNe || '').slice(0, 500),
+              updatedAt: v.updatedAt || Date.now(),
+            };
+          }
+        }
+      }
     } catch (err) {
       console.error('Failed to parse HIGHWAY_OVERRIDES_JSON env variable:', err.message);
     }
   }
   if (Object.keys(overrides).length === 0 && fs.existsSync(HIGHWAY_OVERRIDES_FILE)) {
     try {
-      overrides = JSON.parse(fs.readFileSync(HIGHWAY_OVERRIDES_FILE, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(HIGHWAY_OVERRIDES_FILE, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed)) {
+          if (VALID_HIGHWAY_IDS.has(k) && v && typeof v === 'object') {
+            overrides[k] = {
+              status: v.status || 'open',
+              noteEn: String(v.noteEn || '').slice(0, 500),
+              noteNe: String(v.noteNe || '').slice(0, 500),
+              updatedAt: v.updatedAt || Date.now(),
+            };
+          }
+        }
+      }
     } catch (err) {
       console.error('Failed to read highway-overrides.json:', err.message);
     }
   }
+  inMemoryHighwayOverrides = overrides;
   return overrides;
 }
 
 function saveHighwayOverride(id, data) {
   const current = getHighwayOverrides();
-  current[id] = {
-    ...data,
-    updatedAt: Date.now(),
-  };
-  try {
-    fs.writeFileSync(HIGHWAY_OVERRIDES_FILE, JSON.stringify(current, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to write highway-overrides.json:', err.message);
+  if (data.status === 'clear') {
+    delete current[id];
+  } else {
+    current[id] = {
+      status: data.status,
+      noteEn: String(data.noteEn || '').replace(/<[^>]*>?/gm, '').slice(0, 500),
+      noteNe: String(data.noteNe || '').replace(/<[^>]*>?/gm, '').slice(0, 500),
+      updatedAt: Date.now(),
+    };
   }
+  inMemoryHighwayOverrides = current;
+
+  // Asynchronous and error-resilient file persistence
+  fs.writeFile(HIGHWAY_OVERRIDES_FILE, JSON.stringify(current, null, 2), 'utf8', (err) => {
+    if (err) {
+      console.warn('Notice: Could not persist highway-overrides.json (filesystem may be read-only):', err.message);
+    }
+  });
   return current;
+}
+
+function verifyAdminAuth(req) {
+  const configuredSecret = process.env.ADMIN_SECRET_KEY;
+  if (!configuredSecret || typeof configuredSecret !== 'string' || configuredSecret.trim().length === 0) {
+    return { ok: false, status: 401, error: 'Admin secret key is not configured on the server.' };
+  }
+
+  const authHeader = req.headers['authorization'] || '';
+  const customHeader = req.headers['x-admin-key'] || '';
+  let token = '';
+
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (customHeader) {
+    token = String(customHeader).trim();
+  }
+
+  if (!token) {
+    return { ok: false, status: 401, error: 'Missing authorization header (Bearer token) or x-admin-key.' };
+  }
+
+  try {
+    const expectedBuf = Buffer.from(configuredSecret.trim());
+    const tokenBuf = Buffer.from(token);
+    if (expectedBuf.length !== tokenBuf.length || !crypto.timingSafeEqual(expectedBuf, tokenBuf)) {
+      return { ok: false, status: 401, error: 'Invalid admin credentials.' };
+    }
+    return { ok: true };
+  } catch (_) {
+    return { ok: false, status: 401, error: 'Authentication verification failed.' };
+  }
 }
 
 // ---- Department of Roads (DoR) Official API Integration (Priority 2) -----
@@ -953,18 +1088,18 @@ async function fetchDepartmentOfRoads() {
     const json = await res.json();
     const items = Array.isArray(json) ? json : (json.data || []);
     const valid = items.map((item) => ({
-      id: String(item.id),
-      roadRefNo: item.road_refno || '',
-      roadName: item.road_name || '',
-      closureType: (item.closure_type || 'CLOSED').toUpperCase(),
-      closureReason: item.closure_reason || 'Disaster / Obstruction',
-      location: item.location || '',
-      district: item.district || '',
+      id: String(item.id || ''),
+      roadRefNo: String(item.road_refno || '').slice(0, 50),
+      roadName: String(item.road_name || '').slice(0, 100),
+      closureType: String(item.closure_type || 'CLOSED').toUpperCase(),
+      closureReason: String(item.closure_reason || 'Disaster / Obstruction').slice(0, 150),
+      location: String(item.location || '').slice(0, 100),
+      district: String(item.district || '').slice(0, 50),
       lat: toNumber(item.latitude),
       lon: toNumber(item.longitude),
-      repairEta: item.repair_eta || '',
-      remarks: item.remarks || '',
-      efforts: item.efforts_being_made || '',
+      repairEta: String(item.repair_eta || '').slice(0, 50),
+      remarks: String(item.remarks || '').slice(0, 300),
+      efforts: String(item.efforts_being_made || '').slice(0, 300),
       reportedAt: item.date_created || item.date_roadblock_start || null,
       dorUrl: 'https://navigate.dor.gov.np/app/dashboard',
     })).filter((x) => x.lat && x.lon);
@@ -982,7 +1117,7 @@ setInterval(() => {
   fetchDepartmentOfRoads().catch(() => {});
 }, 2 * 60 * 60 * 1000);
 
-// ---- Real-Time Highway News Status Classification Engine (Priority 4) ----
+// ---- Real-Time Highway News Status Classification Engine -----------------
 const HIGHWAY_SEARCH_CONFIG = {
   'prithvi-ktm-mugling': { terms: ['पृथ्वी राजमार्ग', 'थानकोट नौबिसे', 'मुग्लिन', 'मलेखु'], en: 'Prithvi Highway (Kathmandu-Mugling)' },
   'prithvi-mugling-pkr': { terms: ['मुग्लिन पोखरा', 'पृथ्वी राजमार्ग पोखरा', 'तनहुँ सडक'], en: 'Prithvi Highway (Mugling-Pokhara)' },
@@ -1005,16 +1140,35 @@ const highwayNewsCache = new Map();
 const HW_NEWS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 function classifyNewsStatus(title) {
-  if (!title) return null;
-  const isBlocked = /(अवरुद्ध|ठप्प|बन्द|रोकियो|सडक अवरोध|पहिरोले बन्द|यातायात अवरुद्ध|पहिरो खसेर अवरुद्ध|सवारी आवागमन ठप्प|सडक जाम|blocked|shut down|closed|halted)/i.test(title);
-  const isOpen = /(सुचारु|सञ्चालनमा आयो|सञ्चालनमा|सडक खुल्यो|सवारी सुचारु|खुला भयो|खुला गरिएको|reopened|cleared|traffic resumed|resumed|operational)/i.test(title);
-  const isCaution = /(एकतर्फी|सावधानी|सतर्कता|पहिरोको जोखिम|एक लेन|single lane|one way|caution|alert)/i.test(title);
+  if (!title || typeof title !== 'string') return null;
+  const clean = title.trim();
 
-  if (isBlocked && !isOpen) return 'blocked';
-  if (isOpen && isCaution) return 'caution';
-  if (isOpen && !isBlocked) return 'open';
-  if (isCaution) return 'caution';
-  if (isBlocked) return 'blocked';
+  // Context terms relating to road/traffic/clearance/landslide
+  const hasRoadHazardContext = /(पहिरो|लेदो|गेग्रान|बाढी|सडक|राजमार्ग|यातायात|सवारी|बाटो|खुलाउने|पन्छाउने|सुचारु|हटाउने|landslide|debris|mudslide|highway|road|traffic|clearance)/i.test(clean);
+
+  // Explicit negative / negation markers that invalidate "open" status or indicate obstruction
+  const hasNegation = /(हुन सकेन|भएन|सकेन|छैन|असफल|समस्या|अझै|अवरुद्ध नै|खुल्न सकेन|बाधा|पन्छाउन कठिन|समय लाग्ने|रोकिएको छ|failed|could not|not yet|unable|halt(s|ed|ing)?|stalled|delay|cannot|difficult)/i.test(clean);
+
+  // Definite blockage terms
+  const hasBlocked = /(अवरुद्ध|ठप्प|बन्द|रोकियो|सडक अवरोध|पहिरोले बन्द|यातायात अवरुद्ध|पहिरो खसेर अवरुद्ध|सवारी आवागमन ठप्प|सडक जाम|पहिरोका कारण बन्द|सडक भासियो|पुल भत्कियो|block(ed|s|ing)?|shut\s*down|clos(ed|es|ing)?|halt(s|ed|ing)?|landslide obstruction|road severed|disrupt(ed|s|ing)?|suspend(ed|s|ing)?)/i.test(clean);
+
+  // Definite open/cleared terms
+  const hasOpen = /(सञ्चालनमा आयो|सडक खुल्यो|सवारी सुचारु|खुला भयो|खुला गरिएको|दुईतर्फी सुचारु|दुईतर्फी खुल्यो|पूर्ण रूपमा सुचारु|reopen(ed|s|ing)?|clear(ed|s|ing)?|traffic resumed|resum(ed|es|ing)?|fully operational|two-way traffic)/i.test(clean);
+
+  // Caution / Partial / One-way terms
+  const hasCaution = /(एकतर्फी|सावधानी|सतर्कता|पहिरोको जोखिम|एक लेन|पहिरो हटाउने प्रयास|पहिरो पन्छाउने कार्य|single lane|one way|caution|alert|clearance underway|partial)/i.test(clean);
+
+  // If there is negation/failure combined with road/hazard/open/clearance context, it is BLOCKED
+  if (hasNegation && (hasOpen || hasBlocked || hasCaution || hasRoadHazardContext)) {
+    return 'blocked';
+  }
+
+  if (hasBlocked && !hasOpen) return 'blocked';
+  if (hasOpen && hasCaution) return 'caution';
+  if (hasOpen && !hasBlocked && !hasNegation) return 'open';
+  if (hasCaution) return 'caution';
+  if (hasBlocked) return 'blocked';
+
   return null;
 }
 
@@ -1074,170 +1228,269 @@ async function fetchHighwayNewsStatus(highwayId) {
   }
 }
 
+// Request Coalescing Promise for Highway queries
+let inFlightHighwayPromise = null;
+
+const STATUS_SEVERITY = {
+  'blocked': 4,
+  'night-banned': 3,
+  'caution': 2,
+  'open': 1,
+};
+
 async function getDynamicHighways() {
-  const highwayOverrides = getHighwayOverrides();
-  
-  // Parallel fetch: DoR official closures, BIPAD disaster incidents, and News RSS
-  const [dorClosures, activeIncidents, newsResults] = await Promise.all([
-    fetchDepartmentOfRoads().catch(() => []),
-    (async () => {
-      if (incidentsCache.data && Date.now() - incidentsCache.at < CACHE_TTL_MS) {
-        return incidentsCache.data;
+  if (inFlightHighwayPromise) {
+    return inFlightHighwayPromise;
+  }
+
+  inFlightHighwayPromise = (async () => {
+    const highwayOverrides = getHighwayOverrides();
+    
+    // Batch news queries to prevent outbound request storms
+    const [dorClosures, activeIncidents, newsResults] = await Promise.all([
+      fetchDepartmentOfRoads().catch(() => []),
+      (async () => {
+        if (incidentsCache.data && Date.now() - incidentsCache.at < CACHE_TTL_MS) {
+          return incidentsCache.data;
+        }
+        try {
+          const data = await fetchIncidents();
+          incidentsCache = { at: Date.now(), data };
+          return data;
+        } catch (_) {
+          return incidentsCache.data || [];
+        }
+      })(),
+      Promise.allSettled(HIGHWAYS.map((h) => fetchHighwayNewsStatus(h.id))),
+    ]);
+
+    const now = Date.now();
+    const fortyEightHoursAgo = now - 48 * 60 * 60 * 1000;
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+
+    // Filter relevant recent incidents (acute <= 48h, recovery <= 7 days)
+    const trackedIncidents = activeIncidents.filter((inc) => {
+      if (inc.lat == null || inc.lon == null) return false;
+      const t = new Date(inc.occurredAt).getTime();
+      return isNaN(t) || t >= sevenDaysAgo;
+    });
+
+    const GEO_BLOCK_THRESHOLD_KM = 2.0;   // Definite road blockage within 2.0km
+    const GEO_CAUTION_THRESHOLD_KM = 6.0; // Caution / nearby hazard between 2.0km and 6.0km
+    const DOR_MATCH_THRESHOLD_KM = 4.5;   // DoR official point match within 4.5km
+
+    const processed = HIGHWAYS.map((h, idx) => {
+      const highway = { ...h };
+      const newsStatus = newsResults[idx] && newsResults[idx].status === 'fulfilled' ? newsResults[idx].value : null;
+
+      // Start with baseline status and collected hazards
+      let candidateStatus = highway.status || 'open';
+      let candidateSource = 'baseline';
+      const activeHazards = [];
+
+      // 1. Evaluate All Department of Roads (DoR) Official Road Closure Notices
+      const matchingDorList = [];
+      for (const dor of dorClosures) {
+        const dist = distToPolylineKm(dor.lat, dor.lon, highway.coords || [[highway.lat, highway.lon]]);
+        if (dist <= DOR_MATCH_THRESHOLD_KM) {
+          matchingDorList.push({ dor, dist: Number(dist.toFixed(1)) });
+        }
       }
-      try {
-        const data = await fetchIncidents();
-        incidentsCache = { at: Date.now(), data };
-        return data;
-      } catch (_) {
-        return incidentsCache.data || [];
+
+      if (matchingDorList.length > 0) {
+        // Sort closest first
+        matchingDorList.sort((a, b) => a.dist - b.dist);
+        const closestDor = matchingDorList[0].dor;
+        const minDorDist = matchingDorList[0].dist;
+        const isClosed = matchingDorList.some(m => m.dor.closureType === 'CLOSED');
+        const dorStatus = isClosed ? 'blocked' : 'caution';
+
+        if (STATUS_SEVERITY[dorStatus] > (STATUS_SEVERITY[candidateStatus] || 0)) {
+          candidateStatus = dorStatus;
+          candidateSource = 'dor';
+        }
+
+        highway.dorNotice = {
+          id: closestDor.id,
+          roadRefNo: closestDor.roadRefNo,
+          roadName: closestDor.roadName,
+          closureType: closestDor.closureType,
+          closureReason: closestDor.closureReason,
+          location: closestDor.location,
+          district: closestDor.district,
+          repairEta: closestDor.repairEta,
+          remarks: closestDor.remarks,
+          distKm: minDorDist,
+          totalNotices: matchingDorList.length,
+        };
+        highway.dorUrl = closestDor.dorUrl;
+
+        const locStr = [closestDor.location, closestDor.district].filter(Boolean).join(', ');
+        const etaStr = closestDor.repairEta ? ` · ETA: ${closestDor.repairEta}` : '';
+        const reasonStr = closestDor.closureReason || 'Obstruction';
+        const dorNoteEn = `⛔ DoR Notice: Road ${isClosed ? 'closed' : 'partially open'} near ${locStr} due to ${reasonStr}${etaStr}.${closestDor.remarks ? ' ' + closestDor.remarks : ''}`;
+        const dorNoteNe = `⛔ सडक विभाग: ${locStr} खण्डमा ${reasonStr}का कारण सडक ${isClosed ? 'बन्द' : 'एकतर्फी'}${etaStr}।${closestDor.remarks ? ' ' + closestDor.remarks : ''}`;
+
+        activeHazards.push({
+          type: 'dor',
+          status: dorStatus,
+          noteEn: dorNoteEn,
+          noteNe: dorNoteNe,
+          distKm: minDorDist,
+          url: closestDor.dorUrl,
+        });
       }
-    })(),
-    Promise.allSettled(HIGHWAYS.map((h) => fetchHighwayNewsStatus(h.id))),
-  ]);
 
-  const fortyEightHoursAgo = Date.now() - 48 * 60 * 60 * 1000;
-  const recentLandslides = activeIncidents.filter((inc) => {
-    if (inc.lat == null || inc.lon == null) return false;
-    const t = new Date(inc.occurredAt).getTime();
-    return isNaN(t) || t >= fortyEightHoursAgo;
-  });
-
-  const GEO_BLOCK_THRESHOLD_KM = 2.0;   // Definite road blockage within 2.0km
-  const GEO_CAUTION_THRESHOLD_KM = 6.0; // Caution / nearby hazard between 2.0km and 6.0km
-  const DOR_MATCH_THRESHOLD_KM = 4.5;   // DoR official point match within 4.5km
-  const processed = HIGHWAYS.map((h, idx) => {
-    const highway = { ...h };
-    const newsStatus = newsResults[idx] && newsResults[idx].status === 'fulfilled' ? newsResults[idx].value : null;
-
-    // Default status source
-    highway.statusSource = 'baseline';
-
-    // 1. Check Department of Roads (DoR) Official Road Closure Notices (Priority 2)
-    let closestDor = null;
-    let minDorDist = Infinity;
-
-    for (const dor of dorClosures) {
-      const dist = distToPolylineKm(dor.lat, dor.lon, highway.coords || [[highway.lat, highway.lon]]);
-      if (dist < minDorDist) {
-        minDorDist = dist;
-        closestDor = dor;
-      }
-    }
-
-    if (closestDor && minDorDist <= DOR_MATCH_THRESHOLD_KM) {
-      const isClosed = closestDor.closureType === 'CLOSED';
-      highway.status = isClosed ? 'blocked' : 'caution';
-      highway.statusSource = 'dor';
-      highway.dorNotice = {
-        id: closestDor.id,
-        roadRefNo: closestDor.roadRefNo,
-        roadName: closestDor.roadName,
-        closureType: closestDor.closureType,
-        closureReason: closestDor.closureReason,
-        location: closestDor.location,
-        district: closestDor.district,
-        repairEta: closestDor.repairEta,
-        remarks: closestDor.remarks,
-        distKm: Number(minDorDist.toFixed(1)),
-      };
-      highway.dorUrl = closestDor.dorUrl;
-
-      const locStr = [closestDor.location, closestDor.district].filter(Boolean).join(', ');
-      const etaStr = closestDor.repairEta ? ` · ETA: ${closestDor.repairEta}` : '';
-      const reasonStr = closestDor.closureReason || 'Obstruction';
-      highway.noteEn = `⛔ DoR Notice: Road ${closestDor.closureType.toLowerCase()} near ${locStr} due to ${reasonStr}${etaStr}.${closestDor.remarks ? ' ' + closestDor.remarks : ''}`;
-      highway.noteNe = `⛔ सडक विभाग: ${locStr} खण्डमा ${reasonStr}का कारण सडक ${isClosed ? 'बन्द' : 'एकतर्फी'}${etaStr}।${closestDor.remarks ? ' ' + closestDor.remarks : ''}`;
-    }
-
-    // 2. Check Spatial Geo-Fence against live BIPAD incidents (Priority 3)
-    if (highway.statusSource === 'baseline') {
+      // 2. Evaluate Spatial Geo-Fence against live BIPAD disaster incidents
       let closestIncident = null;
       let minDistance = Infinity;
 
-      for (const inc of recentLandslides) {
+      for (const inc of trackedIncidents) {
         const dist = distToPolylineKm(inc.lat, inc.lon, highway.coords || [[highway.lat, highway.lon]]);
-        if (dist < minDistance) {
+        if (dist <= GEO_CAUTION_THRESHOLD_KM && dist < minDistance) {
           minDistance = dist;
           closestIncident = inc;
         }
       }
 
-      if (closestIncident && minDistance <= GEO_CAUTION_THRESHOLD_KM) {
-        highway.incidentId = closestIncident.id;
-        highway.incidentDistKm = Number(minDistance.toFixed(1));
-        highway.incidentTitleEn = closestIncident.titleEn;
-        highway.incidentTitleNe = closestIncident.titleNe;
-        highway.incidentBipadUrl = closestIncident.bipadUrl;
-
+      if (closestIncident) {
+        const distKm = Number(minDistance.toFixed(1));
+        const incTime = new Date(closestIncident.occurredAt).getTime();
+        const isAcute = isNaN(incTime) || incTime >= fortyEightHoursAgo;
         const enLoc = closestIncident.streetAddress || closestIncident.titleEn;
         const neLoc = closestIncident.streetAddress || closestIncident.titleNe;
 
-        if (minDistance <= GEO_BLOCK_THRESHOLD_KM) {
-          highway.status = 'blocked';
-          highway.statusSource = 'bipad';
-          highway.autoBlocked = true;
-          highway.noteEn = `⛔ Auto-Blocked: Landslide reported ${highway.incidentDistKm} km from road (${enLoc}). Clearance underway.`;
-          highway.noteNe = `⛔ पहिरोले अवरुद्ध: सडकबाट ${highway.incidentDistKm} किमी दूरीमा पहिरो (${neLoc})। खुलाउने प्रयास जारी।`;
-        } else {
-          if (highway.status !== 'blocked' && highway.status !== 'night-banned') {
-            highway.status = 'caution';
+        let incStatus = null;
+        let incNoteEn = '';
+        let incNoteNe = '';
+
+        if (isAcute) {
+          if (distKm <= GEO_BLOCK_THRESHOLD_KM) {
+            incStatus = 'blocked';
+            incNoteEn = `⛔ Auto-Blocked: Landslide reported ${distKm} km from road (${enLoc}). Clearance underway.`;
+            incNoteNe = `⛔ पहिरोले अवरुद्ध: सडकबाट ${distKm} किमी दूरीमा पहिरो (${neLoc})। खुलाउने प्रयास जारी।`;
+          } else {
+            incStatus = 'caution';
+            incNoteEn = `🟡 Caution: Disaster incident reported ${distKm} km away (${enLoc}). Drive with vigilance.`;
+            incNoteNe = `🟡 सतर्कता: सडकबाट ${distKm} किमी नजिक विपद् घटना (${neLoc})। सावधानी अपनाउनुहोस्।`;
           }
-          highway.statusSource = 'bipad';
-          highway.hasNearbyHazard = true;
-          highway.noteEn = `🟡 Caution: Disaster incident reported ${highway.incidentDistKm} km away (${enLoc}). Drive with vigilance.`;
-          highway.noteNe = `🟡 सतर्कता: सडकबाट ${highway.incidentDistKm} किमी नजिक विपद् घटना (${neLoc})। सावधानी अपनाउनुहोस्।`;
+        } else {
+          // Multi-stage recovery phase (48h - 7 days)
+          if (distKm <= 4.0) {
+            incStatus = 'caution';
+            incNoteEn = `🟡 Caution: Recent disaster debris recovery zone (${distKm} km away near ${enLoc}).`;
+            incNoteNe = `🟡 सतर्कता: भर्खरै पहिरो गएको पुनर्निर्माण क्षेत्र (${distKm} किमी नजिक ${neLoc})।`;
+          }
+        }
+
+        if (incStatus) {
+          highway.incidentId = closestIncident.id;
+          highway.incidentDistKm = distKm;
+          highway.incidentTitleEn = closestIncident.titleEn;
+          highway.incidentTitleNe = closestIncident.titleNe;
+          highway.incidentBipadUrl = closestIncident.bipadUrl;
+
+          if (STATUS_SEVERITY[incStatus] > (STATUS_SEVERITY[candidateStatus] || 0)) {
+            candidateStatus = incStatus;
+            candidateSource = 'bipad';
+          }
+
+          activeHazards.push({
+            type: 'bipad',
+            status: incStatus,
+            noteEn: incNoteEn,
+            noteNe: incNoteNe,
+            distKm,
+            url: closestIncident.bipadUrl,
+          });
         }
       }
-    }
 
-    // 3. Check Live Media RSS Feed NLP Match (Priority 4)
-    if (newsStatus && highway.statusSource === 'baseline') {
-      highway.statusSource = 'news';
-      highway.newsTitle = newsStatus.title;
-      highway.newsUrl = newsStatus.url;
-      highway.newsSource = newsStatus.source;
-      highway.newsPubDate = newsStatus.pubDate;
+      // 3. Evaluate Live Verified News Media RSS Feed Match
+      if (newsStatus) {
+        highway.newsTitle = newsStatus.title;
+        highway.newsUrl = newsStatus.url;
+        highway.newsSource = newsStatus.source;
+        highway.newsPubDate = newsStatus.pubDate;
 
-      if (newsStatus.status === 'blocked') {
-        highway.status = 'blocked';
-        highway.noteEn = `⛔ Blocked (News Alert): "${newsStatus.title}" (${newsStatus.source}).`;
-        highway.noteNe = `⛔ अवरुद्ध (समाचार): "${newsStatus.title}" (${newsStatus.source})।`;
-      } else if (newsStatus.status === 'caution') {
-        if (highway.status !== 'blocked' && highway.status !== 'night-banned') {
-          highway.status = 'caution';
+        let newsNoteEn = '';
+        let newsNoteNe = '';
+
+        if (newsStatus.status === 'blocked') {
+          newsNoteEn = `⛔ Blocked (News Alert): "${newsStatus.title}" (${newsStatus.source}).`;
+          newsNoteNe = `⛔ अवरुद्ध (समाचार): "${newsStatus.title}" (${newsStatus.source})।`;
+          if (STATUS_SEVERITY['blocked'] > (STATUS_SEVERITY[candidateStatus] || 0)) {
+            candidateStatus = 'blocked';
+            candidateSource = 'news';
+          }
+        } else if (newsStatus.status === 'caution') {
+          newsNoteEn = `🟡 Caution (News Alert): "${newsStatus.title}" (${newsStatus.source}).`;
+          newsNoteNe = `🟡 सतर्कता (समाचार): "${newsStatus.title}" (${newsStatus.source})।`;
+          if (STATUS_SEVERITY['caution'] > (STATUS_SEVERITY[candidateStatus] || 0)) {
+            candidateStatus = 'caution';
+            candidateSource = 'news';
+          }
+        } else if (newsStatus.status === 'open') {
+          newsNoteEn = `✅ Reopened (News Alert): "${newsStatus.title}" (${newsStatus.source}).`;
+          newsNoteNe = `✅ सुचारु (समाचार): "${newsStatus.title}" (${newsStatus.source})।`;
+          // Only resolve to open if no higher-severity active DoR or BIPAD acute blockage exists
+          if (candidateStatus !== 'blocked' && candidateStatus !== 'night-banned') {
+            candidateStatus = 'open';
+            candidateSource = 'news';
+          }
         }
-        highway.noteEn = `🟡 Caution (News Alert): "${newsStatus.title}" (${newsStatus.source}).`;
-        highway.noteNe = `🟡 सतर्कता (समाचार): "${newsStatus.title}" (${newsStatus.source})।`;
-      } else if (newsStatus.status === 'open') {
-        if (highway.status !== 'night-banned') {
-          highway.status = 'open';
-        }
-        highway.noteEn = `✅ Reopened (News Alert): "${newsStatus.title}" (${newsStatus.source}).`;
-        highway.noteNe = `✅ सुचारु (समाचार): "${newsStatus.title}" (${newsStatus.source})।`;
+
+        activeHazards.push({
+          type: 'news',
+          status: newsStatus.status,
+          noteEn: newsNoteEn,
+          noteNe: newsNoteNe,
+          title: newsStatus.title,
+          url: newsStatus.url,
+          source: newsStatus.source,
+        });
       }
-    }
 
-    // 4. Apply Manual Admin Overrides (Priority 1 - Strict Manual Precedence)
-    const override = highwayOverrides[highway.id];
-    if (override && override.status) {
-      highway.status = override.status;
-      if (override.noteEn) highway.noteEn = override.noteEn;
-      if (override.noteNe) highway.noteNe = override.noteNe;
-      highway.statusSource = 'override';
-      highway.isOverridden = true;
-      highway.autoBlocked = false;
-    }
+      // Final Candidate Resolution before Override
+      highway.status = candidateStatus;
+      highway.statusSource = candidateSource;
+      highway.hazards = activeHazards;
 
-    return highway;
-  });
+      // Select top informative note based on winning status
+      const winningHazard = activeHazards.find(h => h.status === candidateStatus) || activeHazards[0];
+      if (winningHazard) {
+        highway.noteEn = winningHazard.noteEn || highway.noteEn;
+        highway.noteNe = winningHazard.noteNe || highway.noteNe;
+      }
 
-  const HW_STATUS_RANK = { blocked: 4, 'night-banned': 3, caution: 2, open: 1 };
-  return processed.sort((a, b) => {
-    const rankA = HW_STATUS_RANK[a.status] || 0;
-    const rankB = HW_STATUS_RANK[b.status] || 0;
-    if (rankB !== rankA) return rankB - rankA;
-    return (a.nameEn || '').localeCompare(b.nameEn || '');
-  });
+      // 4. Apply Manual Admin Overrides (Priority 1 - Strict Precedence)
+      const override = highwayOverrides[highway.id];
+      if (override && override.status && override.status !== 'clear') {
+        highway.status = override.status;
+        if (override.noteEn) highway.noteEn = override.noteEn;
+        if (override.noteNe) highway.noteNe = override.noteNe;
+        highway.statusSource = 'override';
+        highway.isOverridden = true;
+        highway.autoBlocked = false;
+      }
+
+      return highway;
+    });
+
+    const HW_STATUS_RANK = { blocked: 4, 'night-banned': 3, caution: 2, open: 1 };
+    return processed.sort((a, b) => {
+      const rankA = HW_STATUS_RANK[a.status] || 0;
+      const rankB = HW_STATUS_RANK[b.status] || 0;
+      if (rankB !== rankA) return rankB - rankA;
+      return (a.nameEn || '').localeCompare(b.nameEn || '');
+    });
+  })();
+
+  try {
+    return await inFlightHighwayPromise;
+  } finally {
+    inFlightHighwayPromise = null;
+  }
 }
 
 app.get('/api/highways', async (req, res) => {
@@ -1254,12 +1507,36 @@ app.get('/api/highway-overrides', (req, res) => {
 });
 
 app.post('/api/highway-overrides', express.json(), (req, res) => {
-  const { id, status, noteEn, noteNe } = req.body || {};
-  if (!id || !status) {
-    return res.status(400).json({ error: 'Fields "id" and "status" are required.' });
+  const auth = verifyAdminAuth(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
   }
+
+  const { id, status, noteEn, noteNe } = req.body || {};
+  if (!id || typeof id !== 'string' || !VALID_HIGHWAY_IDS.has(id)) {
+    return res.status(400).json({ error: 'Invalid or unknown highway "id".' });
+  }
+  if (!status || typeof status !== 'string' || !VALID_STATUSES.has(status)) {
+    return res.status(400).json({ error: 'Invalid "status". Must be one of: open, caution, night-banned, blocked, clear.' });
+  }
+
   const updated = saveHighwayOverride(id, { status, noteEn: noteEn || '', noteNe: noteNe || '' });
-  res.json({ success: true, updated: id, override: updated[id] });
+  res.json({ success: true, updated: id, override: updated[id] || null });
+});
+
+app.delete('/api/highway-overrides/:id', (req, res) => {
+  const auth = verifyAdminAuth(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const id = req.params.id;
+  if (!id || typeof id !== 'string' || !VALID_HIGHWAY_IDS.has(id)) {
+    return res.status(400).json({ error: 'Invalid or unknown highway "id".' });
+  }
+
+  const updated = saveHighwayOverride(id, { status: 'clear' });
+  res.json({ success: true, removed: id, overrides: updated });
 });
 
 // ---- Emergency helplines -------------------------------------------------
@@ -1300,6 +1577,8 @@ app.get('/api/situation', async (req, res) => {
   res.json({ source: reports.length ? 'ReliefWeb' : 'fallback', reports, helplines: HELPLINES });
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`nepal-flood-watch on http://localhost:${PORT}`));
+}
 
-app.listen(PORT, () => console.log(`nepal-flood-watch on http://localhost:${PORT}`));
+module.exports = app;

@@ -150,6 +150,30 @@ const SEV_COLOR = {
 const SEV_RANK = { danger: 3, warning: 2, normal: 1, unknown: 0 };
 const HW_RANK = { blocked: 4, 'night-banned': 3, caution: 2, open: 1, normal: 1, unknown: 0 };
 
+// ---- Strict Allowlist DOM Sanitizer & URL Validator -----------------------
+const ALLOWED_URL_SCHEMES = new Set(['http:', 'https:']);
+
+function sanitizeUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  try {
+    const parsed = new URL(rawUrl, window.location.origin);
+    if (ALLOWED_URL_SCHEMES.has(parsed.protocol)) {
+      return parsed.href;
+    }
+  } catch (_) {}
+  return '';
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const isMobile = window.innerWidth < 768;
 const map = L.map('map', {
   zoomControl: false,
@@ -419,20 +443,78 @@ function popupHighwayNode(h) {
   const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
   const statusColor = SEV_COLOR[h.status] || '#10b981';
 
-  let sourceHtml = '';
-  if (h.statusSource === 'bipad' && h.incidentBipadUrl) {
-    sourceHtml = `<div style="margin-top:8px;"><a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#1b2a3a;color:#2f9bff;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">🏛️ ${t('officialReport')} (${h.incidentDistKm} km)</a></div>`;
-  } else if (h.statusSource === 'news' && h.newsUrl) {
-    sourceHtml = `<div style="margin-top:8px;"><a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:3px 8px;background:#1b2a3a;color:#38bdf8;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;">📰 ${h.newsSource || t('readNews')} ➔</a></div>`;
+  // Title
+  const b = document.createElement('b');
+  b.textContent = name;
+  d.appendChild(b);
+  d.appendChild(document.createElement('br'));
+
+  // Place subtitle
+  const sub = document.createElement('span');
+  sub.style.fontSize = '11px';
+  sub.style.color = '#7a8aa0';
+  sub.textContent = `${fromDisp} ➔ ${toDisp}${h.distanceKm ? ` · ${fmtDist(h.distanceKm)}` : ''}`;
+  d.appendChild(sub);
+
+  // Status label
+  const lvl = document.createElement('div');
+  lvl.style.marginTop = '5px';
+  lvl.style.fontSize = '12px';
+  lvl.style.fontWeight = '700';
+  lvl.style.color = statusColor;
+  lvl.textContent = label[h.status] || h.status;
+  d.appendChild(lvl);
+
+  // Note
+  const meta = document.createElement('div');
+  meta.style.marginTop = '4px';
+  meta.style.fontSize = '11px';
+  meta.style.color = '#cbd5e1';
+  meta.style.lineHeight = '1.3';
+  meta.textContent = note;
+  d.appendChild(meta);
+
+  // Validated URL actions
+  const safeDorUrl = sanitizeUrl(h.dorUrl);
+  const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
+  const safeNewsUrl = sanitizeUrl(h.newsUrl);
+
+  if (h.statusSource === 'dor' && safeDorUrl) {
+    const eta = h.dorNotice?.repairEta ? ` (${lang === 'ne' ? 'अनुमानित' : 'ETA'}: ${h.dorNotice.repairEta})` : '';
+    const linkDiv = document.createElement('div');
+    linkDiv.style.marginTop = '8px';
+    const a = document.createElement('a');
+    a.href = safeDorUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.cssText = 'display:inline-block;padding:3px 8px;background:#064e3b;color:#34d399;border:1px solid rgba(52,211,153,0.35);border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;';
+    a.textContent = `🏛️ ${t('sourceTagDor')}${eta} ➔`;
+    linkDiv.appendChild(a);
+    d.appendChild(linkDiv);
+  } else if (h.statusSource === 'bipad' && safeBipadUrl) {
+    const linkDiv = document.createElement('div');
+    linkDiv.style.marginTop = '8px';
+    const a = document.createElement('a');
+    a.href = safeBipadUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.cssText = 'display:inline-block;padding:3px 8px;background:#1b2a3a;color:#2f9bff;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;';
+    a.textContent = `🏛️ ${t('officialReport')} (${h.incidentDistKm || 0} km)`;
+    linkDiv.appendChild(a);
+    d.appendChild(linkDiv);
+  } else if (h.statusSource === 'news' && safeNewsUrl) {
+    const linkDiv = document.createElement('div');
+    linkDiv.style.marginTop = '8px';
+    const a = document.createElement('a');
+    a.href = safeNewsUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.cssText = 'display:inline-block;padding:3px 8px;background:#1b2a3a;color:#38bdf8;border:1px solid #283e58;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;';
+    a.textContent = `📰 ${h.newsSource || t('readNews')} ➔`;
+    linkDiv.appendChild(a);
+    d.appendChild(linkDiv);
   }
 
-  d.innerHTML = `
-    <b>${name}</b><br>
-    <span style="font-size:11px;color:#7a8aa0;">${fromDisp} ➔ ${toDisp}${h.distanceKm ? ` · ${fmtDist(h.distanceKm)}` : ''}</span>
-    <div style="margin-top:5px;font-size:12px;font-weight:700;color:${statusColor};">${label[h.status] || h.status}</div>
-    <div style="margin-top:4px;font-size:11px;color:#cbd5e1;line-height:1.3;">${note}</div>
-    ${sourceHtml}
-  `;
   return d;
 }
 
@@ -1000,31 +1082,36 @@ function selectHighwaySegment(h) {
   const box = document.getElementById('route-verdict');
   if (box) {
     const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
-    const fromDisp = toPlaceName(h.from);
-    const toDisp = toPlaceName(h.to);
-    const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
-    const note = lang === 'ne' ? (h.noteNe || h.noteEn || '') : (h.noteEn || h.noteNe || '');
-    const distInfo = h.distanceKm ? ` · ${fmtDist(h.distanceKm)}` : '';
-    const codeBadge = h.code ? `<span class="badge-code">${h.code}</span>` : '';
+    const fromDisp = escapeHtml(toPlaceName(h.from));
+    const toDisp = escapeHtml(toPlaceName(h.to));
+    const name = escapeHtml(lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe));
+    const note = escapeHtml(lang === 'ne' ? (h.noteNe || h.noteEn || '') : (h.noteEn || h.noteNe || ''));
+    const distInfo = h.distanceKm ? ` · ${escapeHtml(fmtDist(h.distanceKm))}` : '';
+    const codeBadge = h.code ? `<span class="badge-code">${escapeHtml(h.code)}</span>` : '';
 
     let sourceBadge = '';
     let actionBtn = '';
+    const safeDorUrl = sanitizeUrl(h.dorUrl);
+    const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
+    const safeNewsUrl = sanitizeUrl(h.newsUrl);
+
     if (h.statusSource === 'dor') {
       const isRed = h.status === 'blocked';
-      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${isRed ? 'rgba(239,68,68,0.18)' : 'rgba(52,211,153,0.18)'};color:${isRed ? '#ef4444' : '#34d399'};border:1px solid ${isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)'};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${lang === 'ne' ? 'सडक विभाग' : 'DoR'}</span>`;
+      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${isRed ? 'rgba(239,68,68,0.18)' : 'rgba(52,211,153,0.18)'};color:${isRed ? '#ef4444' : '#34d399'};border:1px solid ${isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)'};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${escapeHtml(lang === 'ne' ? 'सडक विभाग' : 'DoR')}</span>`;
+      if (safeDorUrl) actionBtn = `<a href="${safeDorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" style="margin-top:6px;">🏛️ ${escapeHtml(t('sourceTagDor'))} ➔</a>`;
     } else if (h.statusSource === 'bipad') {
-      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${lang === 'ne' ? 'पहिरो' : 'Landslide'} (${h.incidentDistKm} km)</span>`;
-      if (h.incidentBipadUrl) actionBtn = `<a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" style="margin-top:6px;">🏛️ ${t('officialReport')} ➔</a>`;
+      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${escapeHtml(lang === 'ne' ? 'पहिरो' : 'Landslide')} (${escapeHtml(String(h.incidentDistKm || 0))} km)</span>`;
+      if (safeBipadUrl) actionBtn = `<a href="${safeBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" style="margin-top:6px;">🏛️ ${escapeHtml(t('officialReport'))} ➔</a>`;
     } else if (h.statusSource === 'news') {
-      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">📰 ${h.newsSource || 'News'}</span>`;
-      if (h.newsUrl) actionBtn = `<a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn news" style="margin-top:6px;">📰 ${t('readNews')} ➔</a>`;
+      sourceBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">📰 ${escapeHtml(h.newsSource || 'News')}</span>`;
+      if (safeNewsUrl) actionBtn = `<a href="${safeNewsUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn news" style="margin-top:6px;">📰 ${escapeHtml(t('readNews'))} ➔</a>`;
     }
 
-    box.className = 'verdict ' + h.status;
+    box.className = 'verdict ' + (h.status || 'open');
     box.innerHTML = `
       <div class="verdict-header">
         <span>📍 ${fromDisp} ➔ ${toDisp}${distInfo}</span>
-        <span class="verdict-status">${label[h.status] || h.status}</span>
+        <span class="verdict-status">${escapeHtml(label[h.status] || h.status)}</span>
       </div>
       <div style="margin-top:4px;">${codeBadge} <span style="font-weight:600;font-size:12px;">${name}</span>${sourceBadge}</div>
       <div class="sub" style="margin-top:6px;">${note}</div>
@@ -1036,15 +1123,18 @@ function selectHighwaySegment(h) {
 
 function createHighwayCard(h) {
   const div = document.createElement('div');
-  div.className = 'card ' + h.status;
+  div.className = 'card ' + (h.status || 'open');
   const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
-  const name = lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe);
-  const note = lang === 'ne' ? (h.noteNe || h.noteEn) : (h.noteEn || h.noteNe);
-  const codeBadge = h.code ? `<span class="badge-code">${h.code}</span>` : '';
-  const distBadge = h.distanceKm ? `<span class="badge-distance">${fmtDist(h.distanceKm)}</span>` : '';
+  const name = escapeHtml(lang === 'ne' ? (h.nameNe || h.nameEn) : (h.nameEn || h.nameNe));
+  const note = escapeHtml(lang === 'ne' ? (h.noteNe || h.noteEn) : (h.noteEn || h.noteNe));
+  const codeBadge = h.code ? `<span class="badge-code">${escapeHtml(h.code)}</span>` : '';
+  const distBadge = h.distanceKm ? `<span class="badge-distance">${escapeHtml(fmtDist(h.distanceKm))}</span>` : '';
 
   let dynamicBadge = '';
   let actionLink = '';
+  const safeDorUrl = sanitizeUrl(h.dorUrl);
+  const safeBipadUrl = sanitizeUrl(h.incidentBipadUrl);
+  const safeNewsUrl = sanitizeUrl(h.newsUrl);
 
   if (h.statusSource === 'dor') {
     const isRed = h.status === 'blocked';
@@ -1052,35 +1142,38 @@ function createHighwayCard(h) {
     const colorFg = isRed ? '#ef4444' : '#34d399';
     const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(52,211,153,0.4)';
     const tagText = isRed ? (lang === 'ne' ? 'सडक विभाग: बन्द' : 'DoR Closed') : (lang === 'ne' ? 'सडक विभाग: एकतर्फी' : 'DoR One-Way');
-    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${tagText}</span>`;
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🏛️ ${escapeHtml(tagText)}</span>`;
+    if (safeDorUrl) {
+      actionLink = `<a href="${safeDorUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn dor" onclick="event.stopPropagation()">🏛️ ${escapeHtml(t('sourceTagDor'))}</a>`;
+    }
   } else if (h.statusSource === 'bipad') {
     const isRed = h.status === 'blocked';
     const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.18)';
     const colorFg = isRed ? '#ef4444' : '#eab308';
     const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(234,179,8,0.4)';
     const tagText = isRed ? (lang === 'ne' ? 'पहिरो' : 'Landslide') : (lang === 'ne' ? 'विपद् सतर्कता' : 'Hazard Alert');
-    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${tagText} (${h.incidentDistKm} km)</span>`;
-    if (h.incidentBipadUrl) {
-      actionLink = `<a href="${h.incidentBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" onclick="event.stopPropagation()">🏛️ ${t('officialReport')}</a>`;
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🚨 ${escapeHtml(tagText)} (${escapeHtml(String(h.incidentDistKm || 0))} km)</span>`;
+    if (safeBipadUrl) {
+      actionLink = `<a href="${safeBipadUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn bipad" onclick="event.stopPropagation()">🏛️ ${escapeHtml(t('officialReport'))}</a>`;
     }
   } else if (h.statusSource === 'news') {
     const isRed = h.status === 'blocked';
     const colorBg = isRed ? 'rgba(239,68,68,0.18)' : 'rgba(56,189,248,0.18)';
     const colorFg = isRed ? '#ef4444' : '#38bdf8';
     const border = isRed ? 'rgba(239,68,68,0.4)' : 'rgba(56,189,248,0.4)';
-    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">📰 ${h.newsSource || t('sourceTagNews')}</span>`;
-    if (h.newsUrl) {
-      actionLink = `<a href="${h.newsUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn news" onclick="event.stopPropagation()">📰 ${t('readNews')}</a>`;
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:${colorBg};color:${colorFg};border:1px solid ${border};padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">📰 ${escapeHtml(h.newsSource || t('sourceTagNews'))}</span>`;
+    if (safeNewsUrl) {
+      actionLink = `<a href="${safeNewsUrl}" target="_blank" rel="noopener noreferrer" class="hw-action-btn news" onclick="event.stopPropagation()">📰 ${escapeHtml(t('readNews'))}</a>`;
     }
   } else if (h.statusSource === 'override') {
-    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(168,85,247,0.18);color:#a855f7;border:1px solid rgba(168,85,247,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🛠️ ${t('sourceTagOverride')}</span>`;
+    dynamicBadge = `<span class="badge-auto-blocked" style="font-size:10px;background:rgba(168,85,247,0.18);color:#a855f7;border:1px solid rgba(168,85,247,0.4);padding:1px 6px;border-radius:4px;font-weight:700;margin-left:4px;">🛠️ ${escapeHtml(t('sourceTagOverride'))}</span>`;
   }
 
-  const fromDisp = toPlaceName(h.from);
-  const toDisp = toPlaceName(h.to);
+  const fromDisp = escapeHtml(toPlaceName(h.from));
+  const toDisp = escapeHtml(toPlaceName(h.to));
 
   div.innerHTML = `<div class="name"><span>${codeBadge}${name}${dynamicBadge}</span> <span>${distBadge} <span class="badge-type">${fromDisp}–${toDisp}</span></span></div>
-    <div class="lvl">${label[h.status] || h.status}</div>
+    <div class="lvl">${escapeHtml(label[h.status] || h.status)}</div>
     <div class="meta">${note}</div>
     ${actionLink ? `<div class="hw-card-actions">${actionLink}</div>` : ''}`;
 
@@ -1096,21 +1189,21 @@ function createCompositeRouteCard(r) {
   const worst = route.status || 'open';
   div.className = 'card ' + worst;
   const label = { open: t('open'), caution: t('caution'), 'night-banned': t('nightBanned'), blocked: t('blocked') };
-  const note = lang === 'ne' ? (route.noteNe || route.noteEn || '') : (route.noteEn || route.noteNe || '');
-  const distBadge = route.distanceKm ? `<span class="badge-distance">${fmtDist(route.distanceKm)}</span>` : '';
-  const preBadge = `<span class="badge-fastpath">${t('topRouteBadge')}</span>`;
+  const note = escapeHtml(lang === 'ne' ? (route.noteNe || route.noteEn || '') : (route.noteEn || route.noteNe || ''));
+  const distBadge = route.distanceKm ? `<span class="badge-distance">${escapeHtml(fmtDist(route.distanceKm))}</span>` : '';
+  const preBadge = `<span class="badge-fastpath">${escapeHtml(t('topRouteBadge'))}</span>`;
 
-  const fromDisp = toPlaceName(r.from);
-  const toDisp = toPlaceName(r.to);
+  const fromDisp = escapeHtml(toPlaceName(r.from));
+  const toDisp = escapeHtml(toPlaceName(r.to));
 
   const segs = route.segments || [];
   const segChips = segs.map((s) => {
-    const sName = lang === 'ne' ? (s.nameNe || s.nameEn) : (s.nameEn || s.nameNe);
+    const sName = escapeHtml(lang === 'ne' ? (s.nameNe || s.nameEn) : (s.nameEn || s.nameNe));
     return `<span class="seg-chip">${sName}</span>`;
   }).join(' <span class="seg-arrow">➔</span> ');
 
   div.innerHTML = `<div class="name"><span>📍 ${fromDisp} ➔ ${toDisp}</span> <span>${preBadge} ${distBadge}</span></div>
-    <div class="lvl">${label[worst] || worst}</div>
+    <div class="lvl">${escapeHtml(label[worst] || worst)}</div>
     <div class="route-segments">${segChips}</div>
     <div class="meta" style="margin-top:6px;">${note}</div>`;
 
