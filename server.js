@@ -175,7 +175,7 @@ async function fetchIncidents() {
       reportedOn: x.reportedOn || null,
       createdOn: x.createdOn || null,
       incidentOn: x.incidentOn || null,
-      bipadUrl: `https://bipadportal.gov.np/incidents/${x.id}`,
+      bipadUrl: `https://bipadportal.gov.np/incidents/${x.id}/response`,
       dataSource: x.dataSource || 'BIPAD',
       streetAddress: x.streetAddress || null,
     }))
