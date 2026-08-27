@@ -626,7 +626,7 @@ function renderMarkers() {
     });
     const title = lang === 'ne' ? (inc.titleNe || inc.titleEn) : (inc.titleEn || inc.titleNe);
     const dateStr = inc.occurredAt ? formatNewsDateTime(inc.occurredAt) : '';
-    const reportUrl = inc.bipadUrl || `https://bipadportal.gov.np/incidents/${inc.id}`;
+    const reportUrl = inc.bipadUrl || `https://bipadportal.gov.np/incidents/${inc.id}/response`;
 
     const pd = document.createElement('div');
     pd.className = 'popup-incident';
@@ -717,7 +717,7 @@ function createIncidentCard(x) {
 
   const reportLink = document.createElement('a');
   reportLink.className = 'btn-incident-action';
-  reportLink.href = x.bipadUrl || `https://bipadportal.gov.np/incidents/${x.id}`;
+  reportLink.href = x.bipadUrl || `https://bipadportal.gov.np/incidents/${x.id}/response`;
   reportLink.target = '_blank';
   reportLink.rel = 'noopener noreferrer';
   reportLink.innerHTML = `<span>🏛️</span> ${t('officialReport')}`;
