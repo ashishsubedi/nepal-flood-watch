@@ -241,6 +241,11 @@ function formatNewsDateTime(dateStr) {
     hour12: true,
   });
 
+  const isMidnightDateOnly = dateStr.includes('T00:00:00') || dateStr.endsWith('00:00:00+05:45');
+  if (isMidnightDateOnly) {
+    return dateFormatted;
+  }
+
   const tzLabel = lang === 'ne' ? 'नेपाली समय' : 'NPT';
 
   if (relative) {
