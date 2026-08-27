@@ -228,21 +228,25 @@ function formatNewsDateTime(dateStr) {
   }
 
   const dateFormatted = d.toLocaleDateString(lang === 'ne' ? 'ne-NP' : 'en-US', {
+    timeZone: 'Asia/Kathmandu',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
   });
 
   const timeFormatted = d.toLocaleTimeString(lang === 'ne' ? 'ne-NP' : 'en-US', {
+    timeZone: 'Asia/Kathmandu',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
   });
 
+  const tzLabel = lang === 'ne' ? 'नेपाली समय' : 'NPT';
+
   if (relative) {
-    return `${relative} · ${dateFormatted}, ${timeFormatted}`;
+    return `${relative} · ${dateFormatted}, ${timeFormatted} (${tzLabel})`;
   }
-  return `${dateFormatted}, ${timeFormatted}`;
+  return `${dateFormatted}, ${timeFormatted} (${tzLabel})`;
 }
 
 function openNewsModal(incOrQuery) {

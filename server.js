@@ -7,7 +7,7 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;
 const DHM_URL = 'https://dhm.gov.np/hydrology/floodMonitoring';
-const BIPAD_URL = 'https://bipadportal.gov.np/api/v1/incident/?ordering=-incident_on&limit=50';
+const BIPAD_URL = 'https://bipadportal.gov.np/api/v1/incident/?ordering=-created_on&limit=50';
 
 let stationsCache = { at: 0, data: null };
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -171,7 +171,10 @@ async function fetchIncidents() {
       titleEn: x.title || null,
       lat: x.point && x.point.coordinates ? toNumber(x.point.coordinates[1]) : toNumber(x.latitude),
       lon: x.point && x.point.coordinates ? toNumber(x.point.coordinates[0]) : toNumber(x.longitude),
-      occurredAt: x.incidentOn || x.createdOn || null,
+      occurredAt: x.reportedOn || x.createdOn || x.incidentOn || null,
+      reportedOn: x.reportedOn || null,
+      createdOn: x.createdOn || null,
+      incidentOn: x.incidentOn || null,
       bipadUrl: `https://bipadportal.gov.np/incidents/${x.id}`,
       dataSource: x.dataSource || 'BIPAD',
       streetAddress: x.streetAddress || null,
