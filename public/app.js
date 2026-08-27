@@ -1887,4 +1887,8 @@ loadHighways();
 loadHelplines();
 loadIncidents();
 loadRadar();
-setInterval(loadStations, 5 * 60 * 1000);
+setInterval(() => {
+  loadStations();
+  loadHighways();
+  loadIncidents();
+}, 5 * 60 * 1000);
